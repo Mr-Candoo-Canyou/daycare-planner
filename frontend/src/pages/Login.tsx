@@ -25,6 +25,7 @@ export default function Login() {
       if (role === 'parent') navigate('/parent/dashboard');
       else if (role === 'daycare_admin') navigate('/daycare/dashboard');
       else if (role === 'funder') navigate('/funder/dashboard');
+      else if (role === 'system_admin') navigate('/admin/dashboard');
     } catch (err: any) {
       setError(err.response?.data?.error || 'Login failed. Please try again.');
     } finally {
