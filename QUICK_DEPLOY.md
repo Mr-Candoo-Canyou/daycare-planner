@@ -3,9 +3,9 @@
 Step-by-step instructions to deploy Daycare Planner to your Hetzner server.
 
 **Server Details:**
-- IP: `178.156.157.159`
-- User: `root`
-- Password: `rsWquxnkNWLke3MPXPrs`
+- IP: 
+- User: 
+- Password: 
 
 ## Step 1: Set Up SSH Key (Recommended)
 
