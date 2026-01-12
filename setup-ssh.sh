@@ -2,9 +2,14 @@
 # SSH Setup Script for Hetzner Server
 # This sets up SSH key authentication for secure access
 
-SERVER_IP="178.156.157.159"
-SERVER_USER="root"
-SERVER_PASSWORD="rsWquxnkNWLke3MPXPrs"
+# IMPORTANT: Set these values before running
+SERVER_IP="${SERVER_IP:-YOUR_SERVER_IP}"
+SERVER_USER="${SERVER_USER:-root}"
+SERVER_PASSWORD="${SERVER_PASSWORD:-YOUR_SERVER_PASSWORD}"
+
+# Usage:
+# SERVER_IP=1.2.3.4 SERVER_PASSWORD=yourpass ./setup-ssh.sh
+# Or edit this file and replace YOUR_SERVER_IP and YOUR_SERVER_PASSWORD
 
 echo "========================================="
 echo "Setting up SSH Key Authentication"

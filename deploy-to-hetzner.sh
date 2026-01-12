@@ -5,9 +5,14 @@
 set -e  # Exit on error
 
 # Server configuration
-SERVER_IP="178.156.157.159"
+# IMPORTANT: Set SERVER_IP before running this script
+SERVER_IP="${SERVER_IP:-YOUR_SERVER_IP}"
 SERVER_USER="root"
 DEPLOY_USER="deploy"
+
+# Usage:
+# SERVER_IP=1.2.3.4 ./deploy-to-hetzner.sh
+# Or edit this file and replace YOUR_SERVER_IP with your actual server IP
 
 echo "========================================="
 echo "Daycare Planner - Hetzner Deployment"
@@ -144,7 +149,7 @@ JWT_EXPIRES_IN=7d
 BCRYPT_ROUNDS=12
 
 # CORS - Your domain
-CORS_ORIGIN=http://178.156.157.159
+CORS_ORIGIN=http://${SERVER_IP}
 
 # Rate Limiting
 RATE_LIMIT_WINDOW_MS=900000
@@ -252,7 +257,7 @@ ssh $SERVER_USER@$SERVER_IP << 'ENDSSH'
 cat > /etc/nginx/sites-available/daycare-planner << 'NGINXCONF'
 server {
     listen 80;
-    server_name 178.156.157.159;
+    server_name ${SERVER_IP};
 
     # Frontend
     location / {
@@ -300,7 +305,7 @@ echo ""
 print_status "Application is now running!"
 echo ""
 echo "Access your application at:"
-echo "  http://178.156.157.159"
+echo "  http://${SERVER_IP}"
 echo ""
 echo "To check status:"
 echo "  ssh $DEPLOY_USER@$SERVER_IP"
@@ -309,12 +314,12 @@ echo "  docker compose -f docker-compose.prod.yml ps"
 echo "  docker compose -f docker-compose.prod.yml logs -f"
 echo ""
 echo "To set up a domain with SSL:"
-echo "  1. Point your domain A record to 178.156.157.159"
+echo "  1. Point your domain A record to ${SERVER_IP}"
 echo "  2. Update backend/.env CORS_ORIGIN to your domain"
 echo "  3. Run: sudo certbot --nginx -d yourdomain.com"
 echo ""
 print_warning "Next steps:"
-echo "  1. Test the application at http://178.156.157.159"
+echo "  1. Test the application at http://${SERVER_IP}"
 echo "  2. Register a parent account"
 echo "  3. Set up a domain name and SSL certificate"
 echo "  4. Configure automated backups"

@@ -16,11 +16,11 @@ On your **local machine**:
 ssh-keygen -t ed25519 -C "hetzner-daycare"
 
 # Copy key to server (will prompt for password)
-ssh-copy-id root@178.156.157.159
-# Password: rsWquxnkNWLke3MPXPrs
+ssh-copy-id root@YOUR_SERVER_IP
+# Enter your server password when prompted
 
 # Test connection (should work without password)
-ssh root@178.156.157.159
+ssh root@YOUR_SERVER_IP
 ```
 
 ## Step 2: Initial Server Setup
@@ -28,7 +28,7 @@ ssh root@178.156.157.159
 Connect to your server:
 
 ```bash
-ssh root@178.156.157.159
+ssh root@YOUR_SERVER_IP
 ```
 
 Update system and install dependencies:
@@ -104,7 +104,7 @@ JWT_EXPIRES_IN=7d
 BCRYPT_ROUNDS=12
 
 # CORS
-CORS_ORIGIN=http://178.156.157.159
+CORS_ORIGIN=http://YOUR_SERVER_IP
 
 # Rate Limiting
 RATE_LIMIT_WINDOW_MS=900000
@@ -143,7 +143,7 @@ Paste this:
 ```nginx
 server {
     listen 80;
-    server_name 178.156.157.159;
+    server_name YOUR_SERVER_IP;
 
     client_max_body_size 10M;
 
@@ -197,7 +197,7 @@ systemctl reload nginx
 
 Open your browser and go to:
 
-**http://178.156.157.159**
+**http://YOUR_SERVER_IP**
 
 You should see the Daycare Planner login page!
 
@@ -283,8 +283,8 @@ If you have a domain name:
 ### 1. Point Domain to Server
 
 In your domain registrar, add an A record:
-- `yourdomain.com` → `178.156.157.159`
-- `www.yourdomain.com` → `178.156.157.159`
+- `yourdomain.com` → `YOUR_SERVER_IP`
+- `www.yourdomain.com` → `YOUR_SERVER_IP`
 
 ### 2. Update Nginx Config
 
@@ -414,6 +414,6 @@ If you encounter issues:
 
 ---
 
-**Your application is now live at: http://178.156.157.159**
+**Your application is now live at: http://YOUR_SERVER_IP**
 
 Enjoy your privacy-focused daycare waitlist management system! 🎉
