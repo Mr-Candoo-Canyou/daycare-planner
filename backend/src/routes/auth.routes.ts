@@ -52,7 +52,7 @@ router.post('/register', auditLog('register', 'user'), async (req, res) => {
     const token = jwt.sign(
       { id: user.id, email: user.email, role: user.role },
       secret,
-      { expiresIn }
+      { expiresIn: expiresIn as jwt.SignOptions['expiresIn'] }
     );
 
     res.status(201).json({
@@ -117,7 +117,7 @@ router.post('/login', auditLog('login', 'user'), async (req, res) => {
     const token = jwt.sign(
       { id: user.id, email: user.email, role: user.role },
       secret,
-      { expiresIn }
+      { expiresIn: expiresIn as jwt.SignOptions['expiresIn'] }
     );
 
     res.json({

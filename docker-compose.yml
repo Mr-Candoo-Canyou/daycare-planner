@@ -7,7 +7,7 @@ services:
     environment:
       POSTGRES_DB: daycare_planner
       POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres_dev_password
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres_dev_password}
     ports:
       - "5432:5432"
     volumes:
@@ -25,17 +25,18 @@ services:
       dockerfile: Dockerfile
     container_name: daycare-planner-backend
     environment:
-      NODE_ENV: development
+      NODE_ENV: ${NODE_ENV:-development}
       PORT: 3001
       DB_HOST: postgres
       DB_PORT: 5432
       DB_NAME: daycare_planner
       DB_USER: postgres
-      DB_PASSWORD: postgres_dev_password
-      JWT_SECRET: dev_jwt_secret_change_in_production
+      DB_PASSWORD: ${DB_PASSWORD:-postgres_dev_password}
+      DB_SSL: ${DB_SSL:-false}
+      JWT_SECRET: ${JWT_SECRET:-dev_jwt_secret_change_in_production}
       JWT_EXPIRES_IN: 7d
       BCRYPT_ROUNDS: 12
-      CORS_ORIGIN: http://localhost:3000
+      CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:3000}
     ports:
       - "3001:3001"
     depends_on:
@@ -60,7 +61,7 @@ services:
     volumes:
       - ./frontend:/app
       - /app/node_modules
-    command: npm run dev
+    command: npm run dev -- --host
 
 volumes:
   postgres_data:
