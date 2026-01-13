@@ -10,6 +10,7 @@ import applicationsRoutes from './routes/applications.routes';
 import daycaresRoutes from './routes/daycares.routes';
 import childrenRoutes from './routes/children.routes';
 import reportsRoutes from './routes/reports.routes';
+import adminRoutes from './routes/admin.routes';
 
 // Load environment variables
 dotenv.config();
@@ -48,6 +49,7 @@ app.use('/api/applications', applicationsRoutes);
 app.use('/api/daycares', daycaresRoutes);
 app.use('/api/children', childrenRoutes);
 app.use('/api/reports', reportsRoutes);
+app.use('/api/admin', adminRoutes);
 
 // 404 handler
 app.use((req, res) => {

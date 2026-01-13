@@ -1,11 +1,13 @@
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { useAuthStore } from './store/authStore';
 import Layout from './components/Layout';
+import LandingPage from './pages/LandingPage';
 import Login from './pages/Login';
 import Register from './pages/Register';
 import ParentDashboard from './pages/ParentDashboard';
 import DaycareDashboard from './pages/DaycareDashboard';
 import FunderDashboard from './pages/FunderDashboard';
+import AdminDashboard from './pages/AdminDashboard';
 import ApplicationForm from './pages/ApplicationForm';
 
 function App() {
@@ -24,7 +26,7 @@ function App() {
   };
 
   const getDashboardForRole = () => {
-    if (!user) return '/login';
+    if (!user) return '/';
     switch (user.role) {
       case 'parent':
         return '/parent/dashboard';
@@ -32,19 +34,21 @@ function App() {
         return '/daycare/dashboard';
       case 'funder':
         return '/funder/dashboard';
+      case 'system_admin':
+        return '/admin/dashboard';
       default:
-        return '/login';
+        return '/';
     }
   };
 
   return (
     <Routes>
+      <Route path="/" element={
+        isAuthenticated ? <Navigate to={getDashboardForRole()} /> : <LandingPage />
+      } />
+
       <Route path="/login" element={<Login />} />
       <Route path="/register" element={<Register />} />
-
-      <Route path="/" element={
-        isAuthenticated ? <Navigate to={getDashboardForRole()} /> : <Navigate to="/login" />
-      } />
 
       <Route path="/parent" element={
         <ProtectedRoute allowedRoles={['parent']}>
@@ -69,6 +73,14 @@ function App() {
         </ProtectedRoute>
       }>
         <Route path="dashboard" element={<FunderDashboard />} />
+      </Route>
+
+      <Route path="/admin" element={
+        <ProtectedRoute allowedRoles={['system_admin']}>
+          <Layout />
+        </ProtectedRoute>
+      }>
+        <Route path="dashboard" element={<AdminDashboard />} />
       </Route>
     </Routes>
   );

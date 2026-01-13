@@ -21,6 +21,10 @@ export default function Layout() {
         return [
           { to: '/funder/dashboard', label: 'Reports' }
         ];
+      case 'system_admin':
+        return [
+          { to: '/admin/dashboard', label: 'System Administration' }
+        ];
       default:
         return [];
     }
