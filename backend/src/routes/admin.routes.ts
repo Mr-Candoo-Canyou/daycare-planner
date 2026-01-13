@@ -13,10 +13,24 @@ router.get('/users',
     try {
       const result = await pool.query(
         `SELECT
-          id, email, role, first_name, last_name,
-          phone, created_at, last_login, is_active, email_verified
-         FROM users
-         ORDER BY created_at DESC`
+          u.id,
+          u.email,
+          u.role,
+          u.first_name,
+          u.last_name,
+          u.phone,
+          u.created_at,
+          u.last_login,
+          u.is_active,
+          u.email_verified,
+          MIN(d.id::text) as daycare_id,
+          MIN(d.name) as daycare_name
+         FROM users u
+         LEFT JOIN daycare_administrators da ON u.id = da.user_id
+         LEFT JOIN daycares d ON da.daycare_id = d.id
+         GROUP BY u.id, u.email, u.role, u.first_name, u.last_name,
+                  u.phone, u.created_at, u.last_login, u.is_active, u.email_verified
+         ORDER BY u.created_at DESC`
       );
 
       res.json({ users: result.rows });
@@ -234,6 +248,141 @@ router.patch('/users/:id/role',
       res.json({ message: 'User role updated successfully' });
     } catch (error) {
       console.error('Update user role error:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  }
+);
+
+// Update user details (name/email/phone)
+router.patch('/users/:id',
+  authenticateToken,
+  authorizeRoles('system_admin'),
+  auditLog('update_user_details', 'user'),
+  async (req: AuthRequest, res) => {
+    try {
+      const { id } = req.params;
+      const { email, firstName, lastName, phone } = req.body;
+
+      const userResult = await pool.query(
+        'SELECT id, email, first_name, last_name, phone FROM users WHERE id = $1',
+        [id]
+      );
+
+      if (userResult.rows.length === 0) {
+        return res.status(404).json({ error: 'User not found' });
+      }
+
+      const current = userResult.rows[0];
+
+      const normalizedEmail = typeof email === 'string' ? email.trim().toLowerCase() : null;
+      const normalizedFirstName = typeof firstName === 'string' ? firstName.trim() : null;
+      const normalizedLastName = typeof lastName === 'string' ? lastName.trim() : null;
+      const normalizedPhone = typeof phone === 'string' ? phone.trim() : null;
+
+      if (normalizedEmail !== null && normalizedEmail.length === 0) {
+        return res.status(400).json({ error: 'Email cannot be empty' });
+      }
+
+      if (normalizedFirstName !== null && normalizedFirstName.length === 0) {
+        return res.status(400).json({ error: 'First name cannot be empty' });
+      }
+
+      if (normalizedLastName !== null && normalizedLastName.length === 0) {
+        return res.status(400).json({ error: 'Last name cannot be empty' });
+      }
+
+      if (normalizedEmail && normalizedEmail !== current.email) {
+        const emailCheck = await pool.query(
+          'SELECT id FROM users WHERE email = $1 AND id <> $2',
+          [normalizedEmail, id]
+        );
+
+        if (emailCheck.rows.length > 0) {
+          return res.status(409).json({ error: 'Email already in use' });
+        }
+      }
+
+      const updated = {
+        email: normalizedEmail ?? current.email,
+        first_name: normalizedFirstName ?? current.first_name,
+        last_name: normalizedLastName ?? current.last_name,
+        phone: normalizedPhone ?? current.phone
+      };
+
+      const result = await pool.query(
+        `UPDATE users
+         SET email = $1,
+             first_name = $2,
+             last_name = $3,
+             phone = $4,
+             updated_at = CURRENT_TIMESTAMP
+         WHERE id = $5
+         RETURNING id, email, first_name, last_name, phone`,
+        [updated.email, updated.first_name, updated.last_name, updated.phone, id]
+      );
+
+      res.json({ message: 'User updated successfully', user: result.rows[0] });
+    } catch (error) {
+      console.error('Update user error:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  }
+);
+
+// Assign a daycare to a daycare admin (one daycare per admin)
+router.patch('/users/:id/daycare',
+  authenticateToken,
+  authorizeRoles('system_admin'),
+  auditLog('update_user_daycare', 'user'),
+  async (req: AuthRequest, res) => {
+    try {
+      const { id } = req.params;
+      const { daycareId } = req.body;
+
+      const userResult = await pool.query(
+        'SELECT id, role FROM users WHERE id = $1',
+        [id]
+      );
+
+      if (userResult.rows.length === 0) {
+        return res.status(404).json({ error: 'User not found' });
+      }
+
+      if (!daycareId) {
+        await pool.query(
+          'DELETE FROM daycare_administrators WHERE user_id = $1',
+          [id]
+        );
+        return res.json({ message: 'Daycare assignment cleared' });
+      }
+
+      const user = userResult.rows[0];
+      if (user.role !== 'daycare_admin') {
+        return res.status(400).json({ error: 'User is not a daycare admin' });
+      }
+
+      const daycareResult = await pool.query(
+        'SELECT id FROM daycares WHERE id = $1',
+        [daycareId]
+      );
+
+      if (daycareResult.rows.length === 0) {
+        return res.status(404).json({ error: 'Daycare not found' });
+      }
+
+      await pool.query(
+        'DELETE FROM daycare_administrators WHERE user_id = $1',
+        [id]
+      );
+
+      await pool.query(
+        'INSERT INTO daycare_administrators (user_id, daycare_id) VALUES ($1, $2)',
+        [id, daycareId]
+      );
+
+      res.json({ message: 'Daycare assignment updated' });
+    } catch (error) {
+      console.error('Update user daycare error:', error);
       res.status(500).json({ error: 'Internal server error' });
     }
   }

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useAuthStore } from '../store/authStore';
 import api from '../lib/api';
@@ -8,6 +8,24 @@ export default function DaycareDashboard() {
   const queryClient = useQueryClient();
   const user = useAuthStore((state) => state.user);
   const [selectedDaycareId, setSelectedDaycareId] = useState<string>('');
+  const [daycareForm, setDaycareForm] = useState({
+    name: '',
+    address: '',
+    city: '',
+    province: '',
+    postalCode: '',
+    phone: '',
+    email: '',
+    capacity: '',
+    ageRangeMin: '',
+    ageRangeMax: '',
+    languages: '',
+    hasSubsidyProgram: false,
+    description: ''
+  });
+  const [daycareError, setDaycareError] = useState('');
+  const [daycareSuccess, setDaycareSuccess] = useState('');
+  const [waitlistError, setWaitlistError] = useState('');
   const [statusUpdate, setStatusUpdate] = useState<{
     choiceId: string;
     status: string;
@@ -18,9 +36,7 @@ export default function DaycareDashboard() {
   const { data: adminDaycares } = useQuery({
     queryKey: ['admin-daycares'],
     queryFn: async () => {
-      // In a real implementation, we'd have an endpoint to get admin's daycares
-      // For now, we'll use a workaround
-      const response = await api.get('/daycares');
+      const response = await api.get('/daycares/my-daycares');
       return response.data.daycares;
     }
   });
@@ -30,8 +46,14 @@ export default function DaycareDashboard() {
     queryKey: ['waitlist', selectedDaycareId],
     queryFn: async () => {
       if (!selectedDaycareId) return null;
-      const response = await api.get(`/daycares/${selectedDaycareId}/waitlist`);
-      return response.data.waitlist;
+      try {
+        const response = await api.get(`/daycares/${selectedDaycareId}/waitlist`);
+        setWaitlistError('');
+        return response.data.waitlist;
+      } catch (error: any) {
+        setWaitlistError(error?.response?.data?.error || 'Failed to load applications.');
+        return null;
+      }
     },
     enabled: !!selectedDaycareId
   });
@@ -49,6 +71,65 @@ export default function DaycareDashboard() {
       setStatusUpdate(null);
     }
   });
+
+  const updateDaycareMutation = useMutation({
+    mutationFn: async () => {
+      if (!selectedDaycareId) return;
+      const payload = {
+        name: daycareForm.name.trim(),
+        address: daycareForm.address.trim(),
+        city: daycareForm.city.trim(),
+        province: daycareForm.province.trim(),
+        postalCode: daycareForm.postalCode.trim(),
+        phone: daycareForm.phone.trim(),
+        email: daycareForm.email.trim(),
+        capacity: parseInt(daycareForm.capacity, 10),
+        ageRangeMin: daycareForm.ageRangeMin ? parseInt(daycareForm.ageRangeMin, 10) : undefined,
+        ageRangeMax: daycareForm.ageRangeMax ? parseInt(daycareForm.ageRangeMax, 10) : undefined,
+        languages: daycareForm.languages
+          .split(',')
+          .map((lang) => lang.trim())
+          .filter(Boolean),
+        hasSubsidyProgram: daycareForm.hasSubsidyProgram,
+        description: daycareForm.description.trim()
+      };
+
+      await api.patch(`/daycares/${selectedDaycareId}`, payload);
+    },
+    onSuccess: () => {
+      setDaycareSuccess('Daycare updated.');
+      setDaycareError('');
+      queryClient.invalidateQueries({ queryKey: ['admin-daycares'] });
+    },
+    onError: (error: any) => {
+      setDaycareSuccess('');
+      setDaycareError(error?.response?.data?.error || 'Failed to update daycare.');
+    }
+  });
+
+  useEffect(() => {
+    if (!selectedDaycareId || !adminDaycares) return;
+    const selected = adminDaycares.find((daycare: any) => daycare.id === selectedDaycareId);
+    if (!selected) return;
+    setDaycareForm({
+      name: selected.name || '',
+      address: selected.address || '',
+      city: selected.city || '',
+      province: selected.province || '',
+      postalCode: selected.postal_code || '',
+      phone: selected.phone || '',
+      email: selected.email || '',
+      capacity: selected.capacity?.toString() || '',
+      ageRangeMin: selected.age_range_min?.toString() || '',
+      ageRangeMax: selected.age_range_max?.toString() || '',
+      languages: Array.isArray(selected.languages) ? selected.languages.join(', ') : '',
+      hasSubsidyProgram: !!selected.has_subsidy_program,
+      description: selected.description || ''
+    });
+    setDaycareError('');
+    setDaycareSuccess('');
+    setWaitlistError('');
+  }, [adminDaycares, selectedDaycareId]);
 
   const handleStatusChange = (choiceId: string) => {
     if (!statusUpdate) return;
@@ -91,6 +172,156 @@ export default function DaycareDashboard() {
 
       {selectedDaycareId && (
         <>
+          <div className="card">
+            <h3>Daycare Details</h3>
+            {daycareError && (
+              <div className="alert alert-error" style={{ marginBottom: '1rem' }}>
+                {daycareError}
+              </div>
+            )}
+            {daycareSuccess && (
+              <div className="alert alert-success" style={{ marginBottom: '1rem' }}>
+                {daycareSuccess}
+              </div>
+            )}
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                setDaycareError('');
+                setDaycareSuccess('');
+                updateDaycareMutation.mutate();
+              }}
+            >
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '1rem' }}>
+                <div className="form-group">
+                  <label htmlFor="daycare-name">Name</label>
+                  <input
+                    id="daycare-name"
+                    value={daycareForm.name}
+                    onChange={(e) => setDaycareForm({ ...daycareForm, name: e.target.value })}
+                    required
+                  />
+                </div>
+                <div className="form-group">
+                  <label htmlFor="daycare-email">Email</label>
+                  <input
+                    id="daycare-email"
+                    type="email"
+                    value={daycareForm.email}
+                    onChange={(e) => setDaycareForm({ ...daycareForm, email: e.target.value })}
+                  />
+                </div>
+                <div className="form-group">
+                  <label htmlFor="daycare-phone">Phone</label>
+                  <input
+                    id="daycare-phone"
+                    value={daycareForm.phone}
+                    onChange={(e) => setDaycareForm({ ...daycareForm, phone: e.target.value })}
+                  />
+                </div>
+                <div className="form-group">
+                  <label htmlFor="daycare-capacity">Capacity</label>
+                  <input
+                    id="daycare-capacity"
+                    type="number"
+                    min="1"
+                    value={daycareForm.capacity}
+                    onChange={(e) => setDaycareForm({ ...daycareForm, capacity: e.target.value })}
+                    required
+                  />
+                </div>
+                <div className="form-group">
+                  <label htmlFor="daycare-address">Address</label>
+                  <input
+                    id="daycare-address"
+                    value={daycareForm.address}
+                    onChange={(e) => setDaycareForm({ ...daycareForm, address: e.target.value })}
+                    required
+                  />
+                </div>
+                <div className="form-group">
+                  <label htmlFor="daycare-city">City</label>
+                  <input
+                    id="daycare-city"
+                    value={daycareForm.city}
+                    onChange={(e) => setDaycareForm({ ...daycareForm, city: e.target.value })}
+                    required
+                  />
+                </div>
+                <div className="form-group">
+                  <label htmlFor="daycare-province">Province</label>
+                  <input
+                    id="daycare-province"
+                    value={daycareForm.province}
+                    onChange={(e) => setDaycareForm({ ...daycareForm, province: e.target.value })}
+                    required
+                  />
+                </div>
+                <div className="form-group">
+                  <label htmlFor="daycare-postal">Postal Code</label>
+                  <input
+                    id="daycare-postal"
+                    value={daycareForm.postalCode}
+                    onChange={(e) => setDaycareForm({ ...daycareForm, postalCode: e.target.value })}
+                  />
+                </div>
+                <div className="form-group">
+                  <label htmlFor="daycare-age-min">Age Range Min</label>
+                  <input
+                    id="daycare-age-min"
+                    type="number"
+                    min="0"
+                    value={daycareForm.ageRangeMin}
+                    onChange={(e) => setDaycareForm({ ...daycareForm, ageRangeMin: e.target.value })}
+                  />
+                </div>
+                <div className="form-group">
+                  <label htmlFor="daycare-age-max">Age Range Max</label>
+                  <input
+                    id="daycare-age-max"
+                    type="number"
+                    min="0"
+                    value={daycareForm.ageRangeMax}
+                    onChange={(e) => setDaycareForm({ ...daycareForm, ageRangeMax: e.target.value })}
+                  />
+                </div>
+                <div className="form-group">
+                  <label htmlFor="daycare-languages">Languages (comma-separated)</label>
+                  <input
+                    id="daycare-languages"
+                    value={daycareForm.languages}
+                    onChange={(e) => setDaycareForm({ ...daycareForm, languages: e.target.value })}
+                  />
+                </div>
+                <div className="form-group" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                  <input
+                    id="daycare-subsidy"
+                    type="checkbox"
+                    checked={daycareForm.hasSubsidyProgram}
+                    onChange={(e) => setDaycareForm({ ...daycareForm, hasSubsidyProgram: e.target.checked })}
+                  />
+                  <label htmlFor="daycare-subsidy">Has Subsidy Program</label>
+                </div>
+              </div>
+              <div className="form-group" style={{ marginTop: '1rem' }}>
+                <label htmlFor="daycare-description">Description</label>
+                <textarea
+                  id="daycare-description"
+                  value={daycareForm.description}
+                  onChange={(e) => setDaycareForm({ ...daycareForm, description: e.target.value })}
+                  rows={3}
+                />
+              </div>
+              <button type="submit" className="btn-primary" disabled={updateDaycareMutation.isPending}>
+                {updateDaycareMutation.isPending ? 'Updating...' : 'Save Changes'}
+              </button>
+            </form>
+          </div>
+          {waitlistError && (
+            <div className="alert alert-error" style={{ marginBottom: '1rem' }}>
+              {waitlistError}
+            </div>
+          )}
           {isLoading ? (
             <div className="loading">Loading waitlist...</div>
           ) : waitlist && waitlist.length > 0 ? (

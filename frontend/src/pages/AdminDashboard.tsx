@@ -5,6 +5,8 @@ import api from '../lib/api';
 export default function AdminDashboard() {
   const queryClient = useQueryClient();
   const [activeTab, setActiveTab] = useState<'overview' | 'users' | 'daycares' | 'applications' | 'logs'>('overview');
+  const [editingDaycareId, setEditingDaycareId] = useState<string | null>(null);
+  const [editingUserId, setEditingUserId] = useState<string | null>(null);
   const [daycareForm, setDaycareForm] = useState({
     name: '',
     address: '',
@@ -18,10 +20,21 @@ export default function AdminDashboard() {
     ageRangeMax: '',
     languages: '',
     hasSubsidyProgram: false,
-    description: ''
+    description: '',
+    isActive: true
+  });
+  const [userForm, setUserForm] = useState({
+    firstName: '',
+    lastName: '',
+    email: '',
+    phone: '',
+    role: '',
+    daycareId: ''
   });
   const [daycareError, setDaycareError] = useState('');
   const [daycareSuccess, setDaycareSuccess] = useState('');
+  const [userError, setUserError] = useState('');
+  const [userSuccess, setUserSuccess] = useState('');
 
   const { data: statistics } = useQuery({
     queryKey: ['admin-statistics'],
@@ -31,7 +44,7 @@ export default function AdminDashboard() {
     }
   });
 
-  const { data: users } = useQuery({
+  const { data: users, error: usersError, isLoading: usersLoading } = useQuery({
     queryKey: ['admin-users'],
     queryFn: async () => {
       const response = await api.get('/admin/users');
@@ -46,7 +59,7 @@ export default function AdminDashboard() {
       const response = await api.get('/admin/daycares');
       return response.data.daycares;
     },
-    enabled: activeTab === 'daycares'
+    enabled: activeTab === 'daycares' || activeTab === 'users'
   });
 
   const { data: applications } = useQuery({
@@ -85,6 +98,34 @@ export default function AdminDashboard() {
     }
   });
 
+  const updateUserMutation = useMutation({
+    mutationFn: async () => {
+      if (!editingUserId) return;
+      if (userForm.role === 'daycare_admin' && !userForm.daycareId) {
+        throw new Error('Please select a daycare for this admin.');
+      }
+      await api.patch(`/admin/users/${editingUserId}`, {
+        firstName: userForm.firstName.trim(),
+        lastName: userForm.lastName.trim(),
+        email: userForm.email.trim(),
+        phone: userForm.phone.trim()
+      });
+
+      await api.patch(`/admin/users/${editingUserId}/daycare`, {
+        daycareId: userForm.role === 'daycare_admin' ? userForm.daycareId : null
+      });
+    },
+    onSuccess: () => {
+      setUserSuccess('User updated.');
+      setUserError('');
+      queryClient.invalidateQueries({ queryKey: ['admin-users'] });
+    },
+    onError: (error: any) => {
+      setUserSuccess('');
+      setUserError(error?.response?.data?.error || error?.message || 'Failed to update user.');
+    }
+  });
+
   const createDaycareMutation = useMutation({
     mutationFn: async () => {
       const payload = {
@@ -111,6 +152,7 @@ export default function AdminDashboard() {
     onSuccess: () => {
       setDaycareSuccess('Daycare created.');
       setDaycareError('');
+      setEditingDaycareId(null);
       setDaycareForm({
         name: '',
         address: '',
@@ -124,7 +166,8 @@ export default function AdminDashboard() {
         ageRangeMax: '',
         languages: '',
         hasSubsidyProgram: false,
-        description: ''
+        description: '',
+        isActive: true
       });
       queryClient.invalidateQueries({ queryKey: ['admin-daycares'] });
       queryClient.invalidateQueries({ queryKey: ['admin-statistics'] });
@@ -132,6 +175,43 @@ export default function AdminDashboard() {
     onError: (error: any) => {
       setDaycareSuccess('');
       setDaycareError(error?.response?.data?.error || 'Failed to create daycare.');
+    }
+  });
+
+  const updateDaycareMutation = useMutation({
+    mutationFn: async () => {
+      if (!editingDaycareId) return;
+      const payload = {
+        name: daycareForm.name.trim(),
+        address: daycareForm.address.trim(),
+        city: daycareForm.city.trim(),
+        province: daycareForm.province.trim(),
+        postalCode: daycareForm.postalCode.trim(),
+        phone: daycareForm.phone.trim(),
+        email: daycareForm.email.trim(),
+        capacity: parseInt(daycareForm.capacity, 10),
+        ageRangeMin: daycareForm.ageRangeMin ? parseInt(daycareForm.ageRangeMin, 10) : undefined,
+        ageRangeMax: daycareForm.ageRangeMax ? parseInt(daycareForm.ageRangeMax, 10) : undefined,
+        languages: daycareForm.languages
+          .split(',')
+          .map((lang) => lang.trim())
+          .filter(Boolean),
+        hasSubsidyProgram: daycareForm.hasSubsidyProgram,
+        description: daycareForm.description.trim(),
+        isActive: daycareForm.isActive
+      };
+
+      await api.patch(`/daycares/${editingDaycareId}`, payload);
+    },
+    onSuccess: () => {
+      setDaycareSuccess('Daycare updated.');
+      setDaycareError('');
+      queryClient.invalidateQueries({ queryKey: ['admin-daycares'] });
+      queryClient.invalidateQueries({ queryKey: ['admin-statistics'] });
+    },
+    onError: (error: any) => {
+      setDaycareSuccess('');
+      setDaycareError(error?.response?.data?.error || 'Failed to update daycare.');
     }
   });
 
@@ -192,12 +272,138 @@ export default function AdminDashboard() {
   const renderUsers = () => (
     <div>
       <h3>User Management</h3>
+      {usersLoading && (
+        <div className="alert" style={{ marginBottom: '1rem' }}>
+          Loading users...
+        </div>
+      )}
+      {usersError && (
+        <div className="alert alert-error" style={{ marginBottom: '1rem' }}>
+          {(usersError as any)?.response?.data?.error || 'Failed to load users.'}
+        </div>
+      )}
+      <div className="card" style={{ marginBottom: '1.5rem' }}>
+        <h4 style={{ marginTop: 0 }}>
+          {editingUserId ? 'Edit User' : 'Select a user to edit'}
+        </h4>
+        {userError && (
+          <div className="alert alert-error" style={{ marginBottom: '1rem' }}>
+            {userError}
+          </div>
+        )}
+        {userSuccess && (
+          <div className="alert alert-success" style={{ marginBottom: '1rem' }}>
+            {userSuccess}
+          </div>
+        )}
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            setUserError('');
+            setUserSuccess('');
+            updateUserMutation.mutate();
+          }}
+        >
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '1rem' }}>
+            <div className="form-group">
+              <label htmlFor="user-first-name">First Name</label>
+              <input
+                id="user-first-name"
+                value={userForm.firstName}
+                onChange={(e) => setUserForm({ ...userForm, firstName: e.target.value })}
+                required
+                disabled={!editingUserId}
+              />
+            </div>
+            <div className="form-group">
+              <label htmlFor="user-last-name">Last Name</label>
+              <input
+                id="user-last-name"
+                value={userForm.lastName}
+                onChange={(e) => setUserForm({ ...userForm, lastName: e.target.value })}
+                required
+                disabled={!editingUserId}
+              />
+            </div>
+            <div className="form-group">
+              <label htmlFor="user-email">Email</label>
+              <input
+                id="user-email"
+                type="email"
+                value={userForm.email}
+                onChange={(e) => setUserForm({ ...userForm, email: e.target.value })}
+                required
+                disabled={!editingUserId}
+              />
+            </div>
+            <div className="form-group">
+              <label htmlFor="user-phone">Phone</label>
+              <input
+                id="user-phone"
+                value={userForm.phone}
+                onChange={(e) => setUserForm({ ...userForm, phone: e.target.value })}
+                disabled={!editingUserId}
+              />
+            </div>
+            {userForm.role === 'daycare_admin' && (
+              <div className="form-group">
+                <label htmlFor="user-daycare">Assigned Daycare</label>
+                <select
+                  id="user-daycare"
+                  value={userForm.daycareId}
+                  onChange={(e) => setUserForm({ ...userForm, daycareId: e.target.value })}
+                  required
+                  disabled={!editingUserId}
+                >
+                  <option value="">Select a daycare...</option>
+                  {daycares?.map((daycare: any) => (
+                    <option key={daycare.id} value={daycare.id}>
+                      {daycare.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+          </div>
+          <div style={{ display: 'flex', gap: '1rem', marginTop: '1rem' }}>
+            <button
+              type="submit"
+              className="btn-primary"
+              disabled={!editingUserId || updateUserMutation.isPending}
+            >
+              {updateUserMutation.isPending ? 'Saving...' : 'Save Changes'}
+            </button>
+            {editingUserId && (
+              <button
+                type="button"
+                className="btn-outline"
+                onClick={() => {
+                  setEditingUserId(null);
+                  setUserError('');
+                  setUserSuccess('');
+                  setUserForm({
+                    firstName: '',
+                    lastName: '',
+                    email: '',
+                    phone: '',
+                    role: '',
+                    daycareId: ''
+                  });
+                }}
+              >
+                Cancel
+              </button>
+            )}
+          </div>
+        </form>
+      </div>
       <table>
         <thead>
           <tr>
             <th>Name</th>
             <th>Email</th>
             <th>Role</th>
+            <th>Daycare</th>
             <th>Status</th>
             <th>Joined</th>
             <th>Last Login</th>
@@ -212,7 +418,27 @@ export default function AdminDashboard() {
               <td>
                 <select
                   value={user.role}
-                  onChange={(e) => updateUserRoleMutation.mutate({ userId: user.id, role: e.target.value })}
+                  onChange={(e) => {
+                    const nextRole = e.target.value;
+                    updateUserRoleMutation.mutate(
+                      { userId: user.id, role: nextRole },
+                      {
+                        onSuccess: async () => {
+                          if (nextRole !== 'daycare_admin') {
+                            await api.patch(`/admin/users/${user.id}/daycare`, { daycareId: null });
+                          }
+                        }
+                      }
+                    );
+
+                    if (editingUserId === user.id) {
+                      setUserForm((prev) => ({
+                        ...prev,
+                        role: nextRole,
+                        daycareId: nextRole === 'daycare_admin' ? prev.daycareId : ''
+                      }));
+                    }
+                  }}
                   style={{ padding: '0.25rem' }}
                 >
                   <option value="parent">Parent</option>
@@ -221,6 +447,7 @@ export default function AdminDashboard() {
                   <option value="system_admin">System Admin</option>
                 </select>
               </td>
+              <td>{user.daycare_name || '-'}</td>
               <td>
                 <span className={`badge ${user.is_active ? 'badge-accepted' : 'badge-rejected'}`}>
                   {user.is_active ? 'Active' : 'Inactive'}
@@ -229,13 +456,34 @@ export default function AdminDashboard() {
               <td>{new Date(user.created_at).toLocaleDateString()}</td>
               <td>{user.last_login ? new Date(user.last_login).toLocaleDateString() : 'Never'}</td>
               <td>
-                <button
-                  onClick={() => updateUserStatusMutation.mutate({ userId: user.id, isActive: !user.is_active })}
-                  className={user.is_active ? 'btn-danger' : 'btn-secondary'}
-                  style={{ padding: '0.25rem 0.75rem', fontSize: '0.875rem' }}
-                >
-                  {user.is_active ? 'Deactivate' : 'Activate'}
-                </button>
+                <div style={{ display: 'flex', gap: '0.5rem' }}>
+                  <button
+                    onClick={() => {
+                      setEditingUserId(user.id);
+                      setUserError('');
+                      setUserSuccess('');
+                      setUserForm({
+                        firstName: user.first_name || '',
+                        lastName: user.last_name || '',
+                        email: user.email || '',
+                        phone: user.phone || '',
+                        role: user.role || '',
+                        daycareId: user.daycare_id || ''
+                      });
+                    }}
+                    className="btn-outline"
+                    style={{ padding: '0.25rem 0.75rem', fontSize: '0.875rem' }}
+                  >
+                    Edit
+                  </button>
+                  <button
+                    onClick={() => updateUserStatusMutation.mutate({ userId: user.id, isActive: !user.is_active })}
+                    className={user.is_active ? 'btn-danger' : 'btn-secondary'}
+                    style={{ padding: '0.25rem 0.75rem', fontSize: '0.875rem' }}
+                  >
+                    {user.is_active ? 'Deactivate' : 'Activate'}
+                  </button>
+                </div>
               </td>
             </tr>
           ))}
@@ -248,7 +496,9 @@ export default function AdminDashboard() {
     <div>
       <h3>Daycare Management</h3>
       <div className="card" style={{ marginBottom: '1.5rem' }}>
-        <h4 style={{ marginTop: 0 }}>Create Daycare</h4>
+        <h4 style={{ marginTop: 0 }}>
+          {editingDaycareId ? 'Edit Daycare' : 'Create Daycare'}
+        </h4>
         {daycareError && (
           <div className="alert alert-error" style={{ marginBottom: '1rem' }}>
             {daycareError}
@@ -264,7 +514,11 @@ export default function AdminDashboard() {
             e.preventDefault();
             setDaycareError('');
             setDaycareSuccess('');
-            createDaycareMutation.mutate();
+            if (editingDaycareId) {
+              updateDaycareMutation.mutate();
+            } else {
+              createDaycareMutation.mutate();
+            }
           }}
         >
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '1rem' }}>
@@ -377,6 +631,15 @@ export default function AdminDashboard() {
               />
               <label htmlFor="daycare-subsidy">Has Subsidy Program</label>
             </div>
+            <div className="form-group" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+              <input
+                id="daycare-active"
+                type="checkbox"
+                checked={daycareForm.isActive}
+                onChange={(e) => setDaycareForm({ ...daycareForm, isActive: e.target.checked })}
+              />
+              <label htmlFor="daycare-active">Active</label>
+            </div>
           </div>
           <div className="form-group" style={{ marginTop: '1rem' }}>
             <label htmlFor="daycare-description">Description</label>
@@ -387,9 +650,46 @@ export default function AdminDashboard() {
               rows={3}
             />
           </div>
-          <button type="submit" className="btn-primary" disabled={createDaycareMutation.isPending}>
-            {createDaycareMutation.isPending ? 'Creating...' : 'Create Daycare'}
-          </button>
+          <div style={{ display: 'flex', gap: '1rem' }}>
+            <button
+              type="submit"
+              className="btn-primary"
+              disabled={createDaycareMutation.isPending || updateDaycareMutation.isPending}
+            >
+              {editingDaycareId
+                ? (updateDaycareMutation.isPending ? 'Updating...' : 'Update Daycare')
+                : (createDaycareMutation.isPending ? 'Creating...' : 'Create Daycare')}
+            </button>
+            {editingDaycareId && (
+              <button
+                type="button"
+                className="btn-outline"
+                onClick={() => {
+                  setEditingDaycareId(null);
+                  setDaycareError('');
+                  setDaycareSuccess('');
+                  setDaycareForm({
+                    name: '',
+                    address: '',
+                    city: '',
+                    province: '',
+                    postalCode: '',
+                    phone: '',
+                    email: '',
+                    capacity: '',
+                    ageRangeMin: '',
+                    ageRangeMax: '',
+                    languages: '',
+                    hasSubsidyProgram: false,
+                    description: '',
+                    isActive: true
+                  });
+                }}
+              >
+                Cancel
+              </button>
+            )}
+          </div>
         </form>
       </div>
       <table>
@@ -402,6 +702,7 @@ export default function AdminDashboard() {
             <th>Admins</th>
             <th>Active Placements</th>
             <th>Status</th>
+            <th>Actions</th>
           </tr>
         </thead>
         <tbody>
@@ -417,6 +718,35 @@ export default function AdminDashboard() {
                 <span className={`badge ${daycare.is_active ? 'badge-accepted' : 'badge-rejected'}`}>
                   {daycare.is_active ? 'Active' : 'Inactive'}
                 </span>
+              </td>
+              <td>
+                <button
+                  className="btn-outline"
+                  style={{ padding: '0.4rem 0.75rem', fontSize: '0.85rem' }}
+                  onClick={() => {
+                    setEditingDaycareId(daycare.id);
+                    setDaycareError('');
+                    setDaycareSuccess('');
+                    setDaycareForm({
+                      name: daycare.name || '',
+                      address: daycare.address || '',
+                      city: daycare.city || '',
+                      province: daycare.province || '',
+                      postalCode: daycare.postal_code || '',
+                      phone: daycare.phone || '',
+                      email: daycare.email || '',
+                      capacity: daycare.capacity?.toString() || '',
+                      ageRangeMin: daycare.age_range_min?.toString() || '',
+                      ageRangeMax: daycare.age_range_max?.toString() || '',
+                      languages: Array.isArray(daycare.languages) ? daycare.languages.join(', ') : '',
+                      hasSubsidyProgram: !!daycare.has_subsidy_program,
+                      description: daycare.description || '',
+                      isActive: daycare.is_active !== false
+                    });
+                  }}
+                >
+                  Edit
+                </button>
               </td>
             </tr>
           ))}
