@@ -13,15 +13,144 @@ router.get('/users',
     try {
       const result = await pool.query(
         `SELECT
-          id, email, role, first_name, last_name,
-          phone, created_at, last_login, is_active, email_verified
-         FROM users
-         ORDER BY created_at DESC`
+          u.id, u.email, u.role, u.first_name, u.last_name,
+          u.phone, u.created_at, u.last_login, u.is_active, u.email_verified,
+          COALESCE(
+            json_agg(
+              json_build_object(
+                'daycareId', d.id,
+                'daycareName', d.name
+              )
+            ) FILTER (WHERE d.id IS NOT NULL),
+            '[]'
+          ) as assigned_daycares
+         FROM users u
+         LEFT JOIN daycare_administrators da ON u.id = da.user_id
+         LEFT JOIN daycares d ON da.daycare_id = d.id
+         GROUP BY u.id
+         ORDER BY u.created_at DESC`
       );
 
       res.json({ users: result.rows });
     } catch (error) {
       console.error('Get users error:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  }
+);
+
+// Get unassigned daycare administrators
+router.get('/unassigned-daycare-admins',
+  authenticateToken,
+  authorizeRoles('system_admin'),
+  async (req: AuthRequest, res) => {
+    try {
+      const result = await pool.query(
+        `SELECT
+          u.id, u.email, u.first_name, u.last_name
+         FROM users u
+         WHERE u.role = 'daycare_admin'
+         AND NOT EXISTS (
+           SELECT 1 FROM daycare_administrators da
+           WHERE da.user_id = u.id
+         )
+         ORDER BY u.created_at DESC`
+      );
+
+      res.json({ admins: result.rows });
+    } catch (error) {
+      console.error('Get unassigned daycare admins error:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  }
+);
+
+// Assign daycare administrator to a daycare
+router.post('/assign-daycare-admin',
+  authenticateToken,
+  authorizeRoles('system_admin'),
+  auditLog('assign_daycare_admin', 'daycare_administrator'),
+  async (req: AuthRequest, res) => {
+    try {
+      const { userId, daycareId } = req.body;
+
+      if (!userId || !daycareId) {
+        return res.status(400).json({ error: 'Missing userId or daycareId' });
+      }
+
+      // Verify user is a daycare_admin
+      const userCheck = await pool.query(
+        'SELECT role FROM users WHERE id = $1',
+        [userId]
+      );
+
+      if (userCheck.rows.length === 0) {
+        return res.status(404).json({ error: 'User not found' });
+      }
+
+      if (userCheck.rows[0].role !== 'daycare_admin') {
+        return res.status(400).json({ error: 'User is not a daycare administrator' });
+      }
+
+      // Verify daycare exists
+      const daycareCheck = await pool.query(
+        'SELECT id FROM daycares WHERE id = $1',
+        [daycareId]
+      );
+
+      if (daycareCheck.rows.length === 0) {
+        return res.status(404).json({ error: 'Daycare not found' });
+      }
+
+      // Check if already assigned
+      const existingAssignment = await pool.query(
+        'SELECT id FROM daycare_administrators WHERE user_id = $1 AND daycare_id = $2',
+        [userId, daycareId]
+      );
+
+      if (existingAssignment.rows.length > 0) {
+        return res.status(409).json({ error: 'User already assigned to this daycare' });
+      }
+
+      // Assign the administrator
+      await pool.query(
+        'INSERT INTO daycare_administrators (user_id, daycare_id) VALUES ($1, $2)',
+        [userId, daycareId]
+      );
+
+      res.json({ message: 'Daycare administrator assigned successfully' });
+    } catch (error) {
+      console.error('Assign daycare admin error:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  }
+);
+
+// Unassign daycare administrator from a daycare
+router.delete('/unassign-daycare-admin',
+  authenticateToken,
+  authorizeRoles('system_admin'),
+  auditLog('unassign_daycare_admin', 'daycare_administrator'),
+  async (req: AuthRequest, res) => {
+    try {
+      const { userId, daycareId } = req.body;
+
+      if (!userId || !daycareId) {
+        return res.status(400).json({ error: 'Missing userId or daycareId' });
+      }
+
+      const result = await pool.query(
+        'DELETE FROM daycare_administrators WHERE user_id = $1 AND daycare_id = $2 RETURNING id',
+        [userId, daycareId]
+      );
+
+      if (result.rows.length === 0) {
+        return res.status(404).json({ error: 'Assignment not found' });
+      }
+
+      res.json({ message: 'Daycare administrator unassigned successfully' });
+    } catch (error) {
+      console.error('Unassign daycare admin error:', error);
       res.status(500).json({ error: 'Internal server error' });
     }
   }
