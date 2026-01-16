@@ -9,6 +9,10 @@ import { LoginScreen } from '../screens/LoginScreen';
 import { RegisterScreen } from '../screens/RegisterScreen';
 import { ParentDashboardScreen } from '../screens/ParentDashboardScreen';
 import { AdminDashboardScreen } from '../screens/AdminDashboardScreen';
+import { AddChildScreen } from '../screens/AddChildScreen';
+import { NewApplicationScreen } from '../screens/NewApplicationScreen';
+import { DaycareDashboardScreen } from '../screens/DaycareDashboardScreen';
+import { FunderDashboardScreen } from '../screens/FunderDashboardScreen';
 
 const Stack = createNativeStackNavigator();
 
@@ -55,12 +59,27 @@ export const Navigation = () => {
           // App Stack
           <>
             {user.role === 'parent' && (
-              <Stack.Screen name="ParentDashboard" component={ParentDashboardScreen} />
+              <>
+                <Stack.Screen name="ParentDashboard" component={ParentDashboardScreen} />
+                <Stack.Screen name="AddChild" component={AddChildScreen} />
+                <Stack.Screen name="NewApplication" component={NewApplicationScreen} />
+              </>
             )}
             {user.role === 'system_admin' && (
-              <Stack.Screen name="AdminDashboard" component={AdminDashboardScreen} />
+              <>
+                <Stack.Screen name="AdminDashboard" component={AdminDashboardScreen} />
+                <Stack.Screen name="ParentDashboard" component={ParentDashboardScreen} />
+                <Stack.Screen name="AddChild" component={AddChildScreen} />
+                <Stack.Screen name="NewApplication" component={NewApplicationScreen} />
+                <Stack.Screen name="DaycareDashboard" component={DaycareDashboardScreen} />
+              </>
             )}
-            {/* Add other role dashboards as needed */}
+            {user.role === 'daycare_admin' && (
+              <Stack.Screen name="DaycareDashboard" component={DaycareDashboardScreen} />
+            )}
+            {user.role === 'funder' && (
+              <Stack.Screen name="FunderDashboard" component={FunderDashboardScreen} />
+            )}
           </>
         )}
       </Stack.Navigator>

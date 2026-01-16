@@ -8,7 +8,7 @@ const router = express.Router();
 // Create new application (parents only)
 router.post('/',
   authenticateToken,
-  authorizeRoles('parent'),
+  authorizeRoles('parent', 'system_admin'),
   auditLog('create', 'application'),
   async (req: AuthRequest, res) => {
     const client = await pool.connect();
@@ -102,7 +102,7 @@ router.post('/',
 // Get parent's applications
 router.get('/my-applications',
   authenticateToken,
-  authorizeRoles('parent'),
+  authorizeRoles('parent', 'system_admin'),
   async (req: AuthRequest, res) => {
     try {
       const parentId = req.user!.id;
@@ -122,16 +122,43 @@ router.get('/my-applications',
               'daycareName', d.name,
               'preferenceRank', ac.preference_rank,
               'status', ac.status,
-              'statusUpdatedAt', ac.status_updated_at
+              'statusUpdatedAt', ac.status_updated_at,
+              'position', (
+                SELECT 1 + COUNT(*)
+                FROM application_choices ac2
+                JOIN applications a2 ON a2.id = ac2.application_id
+                WHERE ac2.daycare_id = ac.daycare_id
+                  AND ac2.status IN ('pending', 'waitlisted')
+                  AND a2.application_date < a.application_date
+              ),
+              'totalWaitlisted', (
+                SELECT COUNT(*)
+                FROM application_choices ac3
+                WHERE ac3.daycare_id = ac.daycare_id
+                  AND ac3.status IN ('pending', 'waitlisted')
+              ),
+              'aheadEnrolledElsewhere', (
+                SELECT COUNT(*)
+                FROM application_choices ac2
+                JOIN applications a2 ON a2.id = ac2.application_id
+                WHERE ac2.daycare_id = ac.daycare_id
+                  AND ac2.status IN ('pending', 'waitlisted')
+                  AND a2.application_date < a.application_date
+                  AND EXISTS (
+                    SELECT 1 FROM placements p
+                    WHERE p.child_id = a2.child_id
+                    AND (p.end_date IS NULL OR p.end_date > CURRENT_DATE)
+                  )
+              )
             ) ORDER BY ac.preference_rank
           ) as choices
          FROM applications a
          JOIN children c ON a.child_id = c.id
          LEFT JOIN application_choices ac ON a.id = ac.application_id
          LEFT JOIN daycares d ON ac.daycare_id = d.id
-         WHERE a.parent_id = $1
-         GROUP BY a.id, c.first_name, c.last_name, c.date_of_birth
-         ORDER BY a.application_date DESC`,
+        WHERE a.parent_id = $1
+        GROUP BY a.id, c.first_name, c.last_name, c.date_of_birth
+        ORDER BY a.application_date DESC`,
         [parentId]
       );
 
@@ -146,7 +173,7 @@ router.get('/my-applications',
 // Withdraw application
 router.patch('/:id/withdraw',
   authenticateToken,
-  authorizeRoles('parent'),
+  authorizeRoles('parent', 'system_admin'),
   auditLog('withdraw', 'application'),
   async (req: AuthRequest, res) => {
     try {

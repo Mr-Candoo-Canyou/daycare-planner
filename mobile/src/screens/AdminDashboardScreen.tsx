@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   View,
   Text,
@@ -6,17 +6,35 @@ import {
   ScrollView,
   TouchableOpacity,
   RefreshControl,
+  Alert,
 } from 'react-native';
 import { useQuery } from '@tanstack/react-query';
 import { useAuth } from '../contexts/AuthContext';
 import { Card } from '../components/Card';
 import { Button } from '../components/Button';
+import { Input } from '../components/Input';
 import api from '../api/client';
 import { Statistics, User, Daycare } from '../types';
 
-export const AdminDashboardScreen = () => {
+export const AdminDashboardScreen = ({ navigation }: any) => {
   const { user, logout } = useAuth();
   const [activeTab, setActiveTab] = useState<'overview' | 'users' | 'daycares'>('overview');
+  const [newDaycare, setNewDaycare] = useState({
+    name: '',
+    address: '',
+    city: '',
+    province: '',
+    capacity: '',
+  });
+  const [assignAdminId, setAssignAdminId] = useState('');
+  const [assignDaycareId, setAssignDaycareId] = useState('');
+  const [editUserId, setEditUserId] = useState('');
+  const [editUser, setEditUser] = useState({
+    email: '',
+    firstName: '',
+    lastName: '',
+    phone: '',
+  });
 
   const { data: statistics, isLoading: statsLoading, refetch: refetchStats } = useQuery({
     queryKey: ['admin-statistics'],
@@ -41,14 +59,87 @@ export const AdminDashboardScreen = () => {
       const response = await api.get<{ daycares: Daycare[] }>('/admin/daycares');
       return response.data.daycares;
     },
-    enabled: activeTab === 'daycares',
   });
+
+  const { data: unassignedAdmins } = useQuery({
+    queryKey: ['admin-unassigned-daycare-admins'],
+    queryFn: async () => {
+      const response = await api.get<{ admins: User[] }>('/admin/unassigned-daycare-admins');
+      return response.data.admins;
+    },
+  });
+
+  const selectedUser = useMemo(
+    () => users?.find((u) => u.id === editUserId) || null,
+    [users, editUserId]
+  );
 
   const handleRefresh = () => {
     refetchStats();
     if (activeTab === 'users') refetchUsers();
     if (activeTab === 'daycares') refetchDaycares();
   };
+
+  const handleCreateDaycare = async () => {
+    if (!newDaycare.name || !newDaycare.address || !newDaycare.city || !newDaycare.province || !newDaycare.capacity) {
+      return;
+    }
+    try {
+      await api.post('/daycares', {
+        ...newDaycare,
+        capacity: Number(newDaycare.capacity),
+      });
+      setNewDaycare({ name: '', address: '', city: '', province: '', capacity: '' });
+      refetchDaycares();
+    } catch (error: any) {
+      Alert.alert('Error', error.response?.data?.error || 'Failed to create daycare.');
+    }
+  };
+
+  const handleAssignAdmin = async () => {
+    if (!assignAdminId || !assignDaycareId) return;
+    try {
+      await api.post('/admin/assign-daycare-admin', {
+        userId: assignAdminId,
+        daycareId: assignDaycareId,
+      });
+      setAssignAdminId('');
+      setAssignDaycareId('');
+      refetchUsers();
+    } catch (error: any) {
+      Alert.alert('Error', error.response?.data?.error || 'Failed to assign admin.');
+    }
+  };
+
+  const handleUserUpdate = async () => {
+    if (!editUserId) return;
+    try {
+      await api.patch(`/admin/users/${editUserId}`, editUser);
+      refetchUsers();
+    } catch (error: any) {
+      Alert.alert('Error', error.response?.data?.error || 'Failed to update user.');
+    }
+  };
+
+  const toggleUserStatus = async (target: User) => {
+    try {
+      await api.patch(`/admin/users/${target.id}/status`, { isActive: !target.is_active });
+      refetchUsers();
+    } catch (error: any) {
+      Alert.alert('Error', error.response?.data?.error || 'Failed to update status.');
+    }
+  };
+
+  useEffect(() => {
+    if (selectedUser) {
+      setEditUser({
+        email: selectedUser.email || '',
+        firstName: selectedUser.first_name || '',
+        lastName: selectedUser.last_name || '',
+        phone: selectedUser.phone || '',
+      });
+    }
+  }, [selectedUser]);
 
   const renderOverview = () => (
     <View>
@@ -90,17 +181,105 @@ export const AdminDashboardScreen = () => {
           </View>
         </Card>
       </View>
+
+      <Text style={styles.sectionTitle}>Create Daycare</Text>
+      <Card>
+        <Input
+          label="Name"
+          value={newDaycare.name}
+          onChangeText={(value) => setNewDaycare((prev) => ({ ...prev, name: value }))}
+          placeholder="Daycare name"
+        />
+        <Input
+          label="Address"
+          value={newDaycare.address}
+          onChangeText={(value) => setNewDaycare((prev) => ({ ...prev, address: value }))}
+          placeholder="123 Main St"
+        />
+        <Input
+          label="City"
+          value={newDaycare.city}
+          onChangeText={(value) => setNewDaycare((prev) => ({ ...prev, city: value }))}
+          placeholder="Iqaluit"
+        />
+        <Input
+          label="Province"
+          value={newDaycare.province}
+          onChangeText={(value) => setNewDaycare((prev) => ({ ...prev, province: value }))}
+          placeholder="NU"
+        />
+        <Input
+          label="Capacity"
+          value={newDaycare.capacity}
+          onChangeText={(value) => setNewDaycare((prev) => ({ ...prev, capacity: value }))}
+          placeholder="30"
+          keyboardType="numeric"
+        />
+        <Button title="Create Daycare" onPress={handleCreateDaycare} />
+      </Card>
+
+      <Text style={styles.sectionTitle}>Approve Daycare Administrators</Text>
+      <Card>
+        <Text style={styles.helperText}>Assign an unassigned daycare admin to a daycare.</Text>
+        <Input
+          label="Admin User ID"
+          value={assignAdminId}
+          onChangeText={setAssignAdminId}
+          placeholder={unassignedAdmins?.[0]?.id || 'User ID'}
+        />
+        <Input
+          label="Daycare ID"
+          value={assignDaycareId}
+          onChangeText={setAssignDaycareId}
+          placeholder={daycares?.[0]?.id || 'Daycare ID'}
+        />
+        <Button title="Assign Admin" onPress={handleAssignAdmin} />
+      </Card>
     </View>
   );
 
   const renderUsers = () => (
     <View>
       <Text style={styles.sectionTitle}>User Management</Text>
+      <Card>
+        <Input
+          label="User ID"
+          value={editUserId}
+          onChangeText={setEditUserId}
+          placeholder={users?.[0]?.id || 'Select user ID'}
+        />
+        <Input
+          label="Email"
+          value={editUser.email}
+          onChangeText={(value) => setEditUser((prev) => ({ ...prev, email: value }))}
+          placeholder={selectedUser?.email || 'email@example.com'}
+          autoCapitalize="none"
+        />
+        <Input
+          label="First Name"
+          value={editUser.firstName}
+          onChangeText={(value) => setEditUser((prev) => ({ ...prev, firstName: value }))}
+          placeholder={selectedUser?.first_name || 'First'}
+        />
+        <Input
+          label="Last Name"
+          value={editUser.lastName}
+          onChangeText={(value) => setEditUser((prev) => ({ ...prev, lastName: value }))}
+          placeholder={selectedUser?.last_name || 'Last'}
+        />
+        <Input
+          label="Phone"
+          value={editUser.phone}
+          onChangeText={(value) => setEditUser((prev) => ({ ...prev, phone: value }))}
+          placeholder={selectedUser?.phone || 'Phone'}
+        />
+        <Button title="Update User" onPress={handleUserUpdate} />
+      </Card>
       {users?.map((u) => (
         <Card key={u.id}>
           <View style={styles.userRow}>
             <View style={styles.userInfo}>
-              <Text style={styles.userName}>
+              <Text style={styles.userListName}>
                 {u.first_name} {u.last_name}
               </Text>
               <Text style={styles.userEmail}>{u.email}</Text>
@@ -110,6 +289,12 @@ export const AdminDashboardScreen = () => {
               <Text style={styles.statusText}>{u.is_active ? 'Active' : 'Inactive'}</Text>
             </View>
           </View>
+          <Button
+            title={u.is_active ? 'Deactivate' : 'Activate'}
+            onPress={() => toggleUserStatus(u)}
+            variant="outline"
+            style={styles.userAction}
+          />
         </Card>
       ))}
     </View>
@@ -143,6 +328,21 @@ export const AdminDashboardScreen = () => {
           <Text style={styles.userName}>{user?.first_name} {user?.last_name}</Text>
         </View>
         <Button title="Logout" onPress={logout} variant="outline" style={styles.logoutButton} />
+      </View>
+
+      <View style={styles.quickActions}>
+        <Button
+          title="Parent View"
+          onPress={() => navigation.navigate('ParentDashboard')}
+          variant="outline"
+          style={styles.quickButton}
+        />
+        <Button
+          title="Daycare View"
+          onPress={() => navigation.navigate('DaycareDashboard')}
+          variant="outline"
+          style={styles.quickButton}
+        />
       </View>
 
       <View style={styles.tabs}>
@@ -227,6 +427,17 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: '#e2e8f0',
   },
+  quickActions: {
+    flexDirection: 'row',
+    gap: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    backgroundColor: '#f8fafc',
+  },
+  quickButton: {
+    minHeight: 36,
+    paddingVertical: 6,
+  },
   tab: {
     flex: 1,
     paddingVertical: 16,
@@ -291,7 +502,7 @@ const styles = StyleSheet.create({
   userInfo: {
     flex: 1,
   },
-  userName: {
+  userListName: {
     fontSize: 16,
     fontWeight: '600',
     color: '#1e293b',
@@ -306,6 +517,14 @@ const styles = StyleSheet.create({
     fontSize: 10,
     color: '#2563eb',
     fontWeight: '600',
+  },
+  userAction: {
+    marginTop: 12,
+  },
+  helperText: {
+    fontSize: 12,
+    color: '#64748b',
+    marginBottom: 12,
   },
   statusBadge: {
     paddingHorizontal: 8,

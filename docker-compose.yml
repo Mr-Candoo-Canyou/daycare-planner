@@ -36,7 +36,7 @@ services:
       JWT_SECRET: ${JWT_SECRET:-dev_jwt_secret_change_in_production}
       JWT_EXPIRES_IN: 7d
       BCRYPT_ROUNDS: 12
-      CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:3000}
+      CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:3000,http://localhost:8081,http://127.0.0.1:8081,http://178.156.157.159:8081}
     ports:
       - "3001:3001"
     depends_on:

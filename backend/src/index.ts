@@ -20,9 +20,22 @@ const PORT = process.env.PORT || 3001;
 
 // Security middleware
 app.use(helmet());
+const rawOrigins = process.env.CORS_ORIGIN || 'http://localhost:3000';
+const allowedOrigins = rawOrigins
+  .split(',')
+  .map((origin) => origin.trim())
+  .filter(Boolean);
+const isProd = (process.env.NODE_ENV || 'development') === 'production';
+
 app.use(cors({
-  origin: process.env.CORS_ORIGIN || 'http://localhost:3000',
-  credentials: true
+  origin: (origin, callback) => {
+    if (!origin || !isProd || allowedOrigins.includes(origin)) {
+      return callback(null, true);
+    }
+    return callback(new Error('Not allowed by CORS'));
+  },
+  credentials: true,
+  optionsSuccessStatus: 204,
 }));
 
 // Rate limiting

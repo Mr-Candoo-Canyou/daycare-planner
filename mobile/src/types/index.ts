@@ -39,30 +39,34 @@ export interface Child {
   first_name: string;
   last_name: string;
   date_of_birth: string;
-  special_needs?: string;
+  has_special_needs?: boolean;
+  special_needs_description?: string;
+  languages_spoken_at_home?: string[];
+  siblings_in_care?: string[];
+  is_inuk?: boolean;
 }
 
 export interface Application {
   id: string;
-  child_id: string;
-  parent_id: string;
   application_date: string;
   desired_start_date: string;
+  notes?: string;
   opt_in_parent_network: boolean;
-  child_first_name: string;
-  child_last_name: string;
-  child_date_of_birth: string;
+  first_name: string;
+  last_name: string;
+  date_of_birth: string;
   choices: ApplicationChoice[];
 }
 
 export interface ApplicationChoice {
-  id: string;
-  application_id: string;
-  daycare_id: string;
-  preference_rank: number;
+  daycareId: string;
+  daycareName: string;
+  preferenceRank: number;
   status: 'pending' | 'waitlisted' | 'accepted' | 'rejected';
-  status_updated_at?: string;
-  daycare_name: string;
+  statusUpdatedAt?: string;
+  position?: number;
+  totalWaitlisted?: number;
+  aheadEnrolledElsewhere?: number;
 }
 
 export interface Statistics {

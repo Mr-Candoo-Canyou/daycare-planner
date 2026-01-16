@@ -1,5 +1,5 @@
 import React from 'react';
-import { TouchableOpacity, Text, StyleSheet, ActivityIndicator } from 'react-native';
+import { Pressable, Text, StyleSheet, ActivityIndicator } from 'react-native';
 
 interface ButtonProps {
   title: string;
@@ -18,8 +18,8 @@ export const Button: React.FC<ButtonProps> = ({
   loading = false,
   style,
 }) => {
-  const getButtonStyle = () => {
-    const baseStyle = [styles.button];
+  const getButtonStyle = (): any[] => {
+    const baseStyle: any[] = [styles.button];
 
     if (variant === 'primary') baseStyle.push(styles.primary);
     if (variant === 'secondary') baseStyle.push(styles.secondary);
@@ -30,25 +30,28 @@ export const Button: React.FC<ButtonProps> = ({
     return baseStyle;
   };
 
-  const getTextStyle = () => {
-    const baseStyle = [styles.text];
+  const getTextStyle = (): any[] => {
+    const baseStyle: any[] = [styles.text];
     if (variant === 'outline') baseStyle.push(styles.outlineText);
     return baseStyle;
   };
 
   return (
-    <TouchableOpacity
-      style={[...getButtonStyle(), style]}
+    <Pressable
+      style={({ pressed }) => [
+        ...getButtonStyle(),
+        style,
+        pressed && styles.pressed,
+      ]}
       onPress={onPress}
       disabled={disabled || loading}
-      activeOpacity={0.7}
     >
       {loading ? (
         <ActivityIndicator color="#fff" />
       ) : (
         <Text style={getTextStyle()}>{title}</Text>
       )}
-    </TouchableOpacity>
+    </Pressable>
   );
 };
 
@@ -60,6 +63,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     minHeight: 48,
+    cursor: 'pointer',
+  },
+  pressed: {
+    opacity: 0.7,
   },
   primary: {
     backgroundColor: '#2563eb',

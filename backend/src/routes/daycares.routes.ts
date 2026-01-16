@@ -67,21 +67,58 @@ router.get('/my-daycares',
 // Get daycare waitlist (daycare admins only)
 router.get('/:id/waitlist',
   authenticateToken,
-  authorizeRoles('daycare_admin'),
+  authorizeRoles('daycare_admin', 'system_admin'),
   async (req: AuthRequest, res) => {
     try {
       const { id } = req.params;
       const userId = req.user!.id;
+      let policy = typeof req.query.policy === 'string' ? req.query.policy : '';
+      const isSystemAdmin = req.user?.role === 'system_admin';
 
       // Verify user is admin of this daycare
-      const adminCheck = await pool.query(
-        'SELECT id FROM daycare_administrators WHERE user_id = $1 AND daycare_id = $2',
-        [userId, id]
-      );
+      if (!isSystemAdmin) {
+        const adminCheck = await pool.query(
+          'SELECT id FROM daycare_administrators WHERE user_id = $1 AND daycare_id = $2',
+          [userId, id]
+        );
 
-      if (adminCheck.rows.length === 0) {
-        return res.status(403).json({ error: 'Access denied' });
+        if (adminCheck.rows.length === 0) {
+          return res.status(403).json({ error: 'Access denied' });
+        }
       }
+
+      const policyResult = await pool.query(
+        'SELECT waitlist_policy FROM daycares WHERE id = $1',
+        [id]
+      );
+      if (policyResult.rows.length === 0) {
+        return res.status(404).json({ error: 'Daycare not found' });
+      }
+      const storedPolicy = policyResult.rows[0]?.waitlist_policy || 'application_date';
+      policy = policy || storedPolicy;
+
+      const orderBy = (() => {
+        switch (policy) {
+          case 'language':
+            return `CASE WHEN c.languages_spoken_at_home @> ARRAY['Inuktitut'] THEN 0 ELSE 1 END,
+                    a.application_date ASC`;
+          case 'inuk':
+            return `CASE WHEN c.is_inuk THEN 0 ELSE 1 END,
+                    a.application_date ASC`;
+          case 'enrolled_elsewhere':
+            return `CASE WHEN EXISTS (
+                      SELECT 1 FROM placements p
+                      WHERE p.child_id = c.id
+                      AND (p.end_date IS NULL OR p.end_date > CURRENT_DATE)
+                    ) THEN 1 ELSE 0 END,
+                    a.application_date ASC`;
+          case 'random':
+            return 'RANDOM()';
+          case 'application_date':
+          default:
+            return 'a.application_date ASC';
+        }
+      })();
 
       // Get waitlist with placement status
       const result = await pool.query(
@@ -97,6 +134,7 @@ router.get('/:id/waitlist',
           c.last_name,
           c.date_of_birth,
           c.has_special_needs,
+          c.is_inuk,
           c.languages_spoken_at_home,
           c.siblings_in_care,
           u.email as parent_email,
@@ -127,7 +165,7 @@ router.get('/:id/waitlist',
          AND ac.status IN ('pending', 'waitlisted')
          ORDER BY
            CASE WHEN ac.status = 'pending' THEN 0 ELSE 1 END,
-           a.application_date ASC`,
+           ${orderBy}`,
         [id]
       );
 
@@ -139,10 +177,119 @@ router.get('/:id/waitlist',
   }
 );
 
+// Get currently enrolled children (daycare admins only)
+router.get('/:id/enrollments',
+  authenticateToken,
+  authorizeRoles('daycare_admin', 'system_admin'),
+  async (req: AuthRequest, res) => {
+    try {
+      const { id } = req.params;
+      const userId = req.user!.id;
+      const isSystemAdmin = req.user?.role === 'system_admin';
+
+      if (!isSystemAdmin) {
+        const adminCheck = await pool.query(
+          'SELECT id FROM daycare_administrators WHERE user_id = $1 AND daycare_id = $2',
+          [userId, id]
+        );
+
+        if (adminCheck.rows.length === 0) {
+          return res.status(403).json({ error: 'Access denied' });
+        }
+      }
+
+      const result = await pool.query(
+        `SELECT
+          p.id as placement_id,
+          p.start_date,
+          c.id as child_id,
+          c.first_name,
+          c.last_name,
+          c.date_of_birth,
+          c.is_inuk,
+          c.languages_spoken_at_home,
+          u.first_name as parent_first_name,
+          u.last_name as parent_last_name
+         FROM placements p
+         JOIN children c ON p.child_id = c.id
+         JOIN users u ON c.parent_id = u.id
+         WHERE p.daycare_id = $1
+         AND (p.end_date IS NULL OR p.end_date > CURRENT_DATE)
+         ORDER BY p.start_date DESC`,
+        [id]
+      );
+
+      res.json({ enrollments: result.rows });
+    } catch (error) {
+      console.error('Get enrollments error:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  }
+);
+
+// End a placement (remove child from daycare)
+router.patch('/enrollments/:placementId/end',
+  authenticateToken,
+  authorizeRoles('daycare_admin', 'system_admin'),
+  auditLog('remove_enrollment', 'placement'),
+  async (req: AuthRequest, res) => {
+    const client = await pool.connect();
+
+    try {
+      await client.query('BEGIN');
+
+      const { placementId } = req.params;
+      const userId = req.user!.id;
+      const isSystemAdmin = req.user?.role === 'system_admin';
+
+      const placementResult = await client.query(
+        isSystemAdmin
+          ? `SELECT p.id, p.daycare_id
+             FROM placements p
+             WHERE p.id = $1`
+          : `SELECT p.id, p.daycare_id
+             FROM placements p
+             JOIN daycare_administrators da ON p.daycare_id = da.daycare_id
+             WHERE p.id = $1 AND da.user_id = $2`,
+        isSystemAdmin ? [placementId] : [placementId, userId]
+      );
+
+      if (placementResult.rows.length === 0) {
+        return res.status(404).json({ error: 'Placement not found or access denied' });
+      }
+
+      const daycareId = placementResult.rows[0].daycare_id;
+
+      await client.query(
+        `UPDATE placements
+         SET end_date = CURRENT_DATE, updated_at = CURRENT_TIMESTAMP
+         WHERE id = $1`,
+        [placementId]
+      );
+
+      await client.query(
+        `UPDATE daycares
+         SET current_enrollment = GREATEST(current_enrollment - 1, 0)
+         WHERE id = $1`,
+        [daycareId]
+      );
+
+      await client.query('COMMIT');
+      res.json({ message: 'Child removed from daycare' });
+    } catch (error) {
+      await client.query('ROLLBACK');
+      console.error('End placement error:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    } finally {
+      client.release();
+    }
+  }
+);
+
 // Update application status (daycare admins only)
 router.patch('/applications/:choiceId/status',
   authenticateToken,
-  authorizeRoles('daycare_admin'),
+  authorizeRoles('daycare_admin', 'system_admin'),
   auditLog('update_status', 'application_choice'),
   async (req: AuthRequest, res) => {
     const client = await pool.connect();
@@ -153,6 +300,7 @@ router.patch('/applications/:choiceId/status',
       const { choiceId } = req.params;
       const { status, statusNotes } = req.body;
       const userId = req.user!.id;
+      const isSystemAdmin = req.user?.role === 'system_admin';
 
       // Validate status
       const validStatuses = ['pending', 'accepted', 'rejected', 'waitlisted'];
@@ -162,11 +310,15 @@ router.patch('/applications/:choiceId/status',
 
       // Get application choice and verify admin access
       const choiceResult = await client.query(
-        `SELECT ac.*, da.user_id as admin_user_id
-         FROM application_choices ac
-         JOIN daycare_administrators da ON ac.daycare_id = da.daycare_id
-         WHERE ac.id = $1 AND da.user_id = $2`,
-        [choiceId, userId]
+        isSystemAdmin
+          ? `SELECT ac.*, ac.daycare_id
+             FROM application_choices ac
+             WHERE ac.id = $1`
+          : `SELECT ac.*, da.user_id as admin_user_id
+             FROM application_choices ac
+             JOIN daycare_administrators da ON ac.daycare_id = da.daycare_id
+             WHERE ac.id = $1 AND da.user_id = $2`,
+        isSystemAdmin ? [choiceId] : [choiceId, userId]
       );
 
       if (choiceResult.rows.length === 0) {
@@ -280,7 +432,7 @@ router.patch('/:id',
       const {
         name, address, city, province, postalCode, phone, email,
         capacity, ageRangeMin, ageRangeMax, languages,
-        hasSubsidyProgram, description, admissionRules, isActive
+        hasSubsidyProgram, description, admissionRules, isActive, waitlistPolicy
       } = req.body;
 
       const daycareResult = await pool.query(
@@ -321,7 +473,8 @@ router.patch('/:id',
         has_subsidy_program: hasSubsidyProgram ?? daycare.has_subsidy_program,
         description: description ?? daycare.description,
         admission_rules: admissionRules ?? daycare.admission_rules,
-        is_active: isActive ?? daycare.is_active
+        is_active: isActive ?? daycare.is_active,
+        waitlist_policy: waitlistPolicy ?? daycare.waitlist_policy
       };
 
       if (updated.capacity !== null && updated.capacity !== undefined && updated.capacity <= 0) {
@@ -359,8 +512,9 @@ router.patch('/:id',
              description = $13,
              admission_rules = $14,
              is_active = $15,
+             waitlist_policy = $16,
              updated_at = CURRENT_TIMESTAMP
-         WHERE id = $16
+         WHERE id = $17
          RETURNING id, name, updated_at`,
         [
           updated.name,
@@ -378,6 +532,7 @@ router.patch('/:id',
           updated.description,
           admissionRulesPayload,
           updated.is_active,
+          updated.waitlist_policy,
           id
         ]
       );

@@ -8,7 +8,7 @@ const router = express.Router();
 // Get parent's children
 router.get('/',
   authenticateToken,
-  authorizeRoles('parent'),
+  authorizeRoles('parent', 'system_admin'),
   async (req: AuthRequest, res) => {
     try {
       const parentId = req.user!.id;
@@ -16,7 +16,8 @@ router.get('/',
       const result = await pool.query(
         `SELECT
           id, first_name, last_name, date_of_birth,
-          has_special_needs, languages_spoken_at_home, created_at
+          has_special_needs, special_needs_description,
+          languages_spoken_at_home, siblings_in_care, is_inuk, created_at
          FROM children
          WHERE parent_id = $1
          ORDER BY date_of_birth DESC`,
@@ -34,7 +35,7 @@ router.get('/',
 // Add new child
 router.post('/',
   authenticateToken,
-  authorizeRoles('parent'),
+  authorizeRoles('parent', 'system_admin'),
   auditLog('create', 'child'),
   async (req: AuthRequest, res) => {
     try {
@@ -42,7 +43,7 @@ router.post('/',
       const {
         firstName, lastName, dateOfBirth,
         hasSpecialNeeds, specialNeedsDescription,
-        languagesSpokenAtHome, siblingsInCare
+        languagesSpokenAtHome, siblingsInCare, isInuk
       } = req.body;
 
       if (!firstName || !lastName || !dateOfBirth) {
@@ -53,12 +54,12 @@ router.post('/',
         `INSERT INTO children
          (parent_id, first_name, last_name, date_of_birth,
           has_special_needs, special_needs_description,
-          languages_spoken_at_home, siblings_in_care)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+          languages_spoken_at_home, siblings_in_care, is_inuk)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
          RETURNING id, first_name, last_name, date_of_birth, created_at`,
         [parentId, firstName, lastName, dateOfBirth,
          hasSpecialNeeds || false, specialNeedsDescription,
-         languagesSpokenAtHome || [], siblingsInCare || []]
+         languagesSpokenAtHome || [], siblingsInCare || [], isInuk || false]
       );
 
       res.status(201).json({
@@ -75,7 +76,7 @@ router.post('/',
 // Update child
 router.patch('/:id',
   authenticateToken,
-  authorizeRoles('parent'),
+  authorizeRoles('parent', 'system_admin'),
   auditLog('update', 'child'),
   async (req: AuthRequest, res) => {
     try {
@@ -94,7 +95,7 @@ router.patch('/:id',
 
       const {
         firstName, lastName, hasSpecialNeeds,
-        specialNeedsDescription, languagesSpokenAtHome
+        specialNeedsDescription, languagesSpokenAtHome, isInuk
       } = req.body;
 
       const result = await pool.query(
@@ -103,11 +104,12 @@ router.patch('/:id',
              last_name = COALESCE($2, last_name),
              has_special_needs = COALESCE($3, has_special_needs),
              special_needs_description = COALESCE($4, special_needs_description),
-             languages_spoken_at_home = COALESCE($5, languages_spoken_at_home)
-         WHERE id = $6
+             languages_spoken_at_home = COALESCE($5, languages_spoken_at_home),
+             is_inuk = COALESCE($6, is_inuk)
+         WHERE id = $7
          RETURNING id, first_name, last_name, date_of_birth, updated_at`,
         [firstName, lastName, hasSpecialNeeds, specialNeedsDescription,
-         languagesSpokenAtHome, id]
+         languagesSpokenAtHome, isInuk, id]
       );
 
       res.json({

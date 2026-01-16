@@ -6,6 +6,7 @@ import {
   ScrollView,
   TouchableOpacity,
   RefreshControl,
+  Alert,
 } from 'react-native';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '../contexts/AuthContext';
@@ -29,10 +30,19 @@ export const ParentDashboardScreen = ({ navigation }: any) => {
   const { data: applications, isLoading: applicationsLoading, refetch } = useQuery({
     queryKey: ['applications'],
     queryFn: async () => {
-      const response = await api.get<{ applications: Application[] }>('/applications');
+      const response = await api.get<{ applications: Application[] }>('/applications/my-applications');
       return response.data.applications;
     },
   });
+
+  const withdrawApplication = async (applicationId: string) => {
+    try {
+      await api.patch(`/applications/${applicationId}/withdraw`);
+      refetch();
+    } catch (error: any) {
+      Alert.alert('Error', error.response?.data?.error || 'Failed to withdraw application.');
+    }
+  };
 
   const getStatusColor = (status: string) => {
     switch (status) {
@@ -94,8 +104,10 @@ export const ParentDashboardScreen = ({ navigation }: any) => {
                 <Text style={styles.childDetail}>
                   Date of Birth: {new Date(child.date_of_birth).toLocaleDateString()}
                 </Text>
-                {child.special_needs && (
-                  <Text style={styles.childDetail}>Special Needs: {child.special_needs}</Text>
+                {child.has_special_needs && (
+                  <Text style={styles.childDetail}>
+                    Special Needs: {child.special_needs_description || 'Yes'}
+                  </Text>
                 )}
               </Card>
             ))
@@ -123,7 +135,7 @@ export const ParentDashboardScreen = ({ navigation }: any) => {
             applications.map((app) => (
               <Card key={app.id}>
                 <Text style={styles.appChildName}>
-                  {app.child_first_name} {app.child_last_name}
+                  {app.first_name} {app.last_name}
                 </Text>
                 <Text style={styles.appDetail}>
                   Applied: {new Date(app.application_date).toLocaleDateString()}
@@ -135,13 +147,52 @@ export const ParentDashboardScreen = ({ navigation }: any) => {
                 <View style={styles.choicesSection}>
                   <Text style={styles.choicesTitle}>Daycare Choices:</Text>
                   {app.choices.map((choice) => (
-                    <View key={choice.id} style={styles.choiceRow}>
-                      <Text style={styles.choiceRank}>#{choice.preference_rank}</Text>
-                      <Text style={styles.choiceName}>{choice.daycare_name}</Text>
+                    <View key={`${choice.daycareId}-${choice.preferenceRank}`} style={styles.choiceRow}>
+                      <Text style={styles.choiceRank}>#{choice.preferenceRank}</Text>
+                      <View style={styles.choiceInfo}>
+                        <Text style={styles.choiceName}>{choice.daycareName}</Text>
+                        {typeof choice.position === 'number' && (
+                          <Text style={styles.choiceMeta}>
+                            Position: {choice.position}
+                            {typeof choice.aheadEnrolledElsewhere === 'number'
+                              ? ` · Ahead enrolled elsewhere: ${choice.aheadEnrolledElsewhere}`
+                              : ''}
+                          </Text>
+                        )}
+                        {typeof choice.position === 'number' && typeof choice.totalWaitlisted === 'number' && (
+                          <View style={styles.progressTrack}>
+                            <View
+                              style={[
+                                styles.progressFill,
+                                {
+                                  width: `${Math.min(
+                                    100,
+                                    Math.max(5, ((choice.totalWaitlisted - choice.position + 1) / choice.totalWaitlisted) * 100)
+                                  )}%`,
+                                },
+                              ]}
+                            />
+                          </View>
+                        )}
+                      </View>
                       {getStatusBadge(choice.status)}
                     </View>
                   ))}
                 </View>
+
+                {app.choices.some((choice) => choice.status === 'accepted') && (
+                  <View style={styles.acceptedNotice}>
+                    <Text style={styles.acceptedText}>
+                      🎉 Accepted! You can stay on other waitlists for a fee or withdraw now.
+                    </Text>
+                    <Button
+                      title="Withdraw From Other Lists"
+                      onPress={() => withdrawApplication(app.id)}
+                      variant="outline"
+                      style={styles.withdrawButton}
+                    />
+                  </View>
+                )}
 
                 {app.opt_in_parent_network && (
                   <View style={styles.networkBadge}>
@@ -271,6 +322,27 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#1e293b',
   },
+  choiceInfo: {
+    flex: 1,
+    marginRight: 8,
+  },
+  choiceMeta: {
+    fontSize: 12,
+    color: '#64748b',
+    marginTop: 2,
+  },
+  progressTrack: {
+    height: 6,
+    backgroundColor: '#e2e8f0',
+    borderRadius: 3,
+    marginTop: 6,
+    overflow: 'hidden',
+  },
+  progressFill: {
+    height: 6,
+    backgroundColor: '#38bdf8',
+    borderRadius: 3,
+  },
   badge: {
     paddingHorizontal: 8,
     paddingVertical: 4,
@@ -291,6 +363,20 @@ const styles = StyleSheet.create({
     color: '#2563eb',
     fontSize: 12,
     fontWeight: '600',
+  },
+  acceptedNotice: {
+    marginTop: 12,
+    padding: 10,
+    backgroundColor: '#fef9c3',
+    borderRadius: 6,
+  },
+  acceptedText: {
+    fontSize: 12,
+    color: '#92400e',
+    marginBottom: 8,
+  },
+  withdrawButton: {
+    minHeight: 36,
   },
   emptyText: {
     fontSize: 14,

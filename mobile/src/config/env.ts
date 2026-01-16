@@ -2,9 +2,9 @@
  * Environment configuration
  *
  * Update the API_URL based on your environment:
- * - Android Emulator: http://178.156.157.159:3000/api
- * - iOS Simulator: http://localhost:3000/api
- * - Physical Device: http://YOUR_COMPUTER_IP:3000/api (e.g., http://192.168.1.100:3000/api)
+ * - Android Emulator: http://178.156.157.159:3001/api
+ * - iOS Simulator: http://localhost:3001/api
+ * - Physical Device: http://YOUR_COMPUTER_IP:3001/api (e.g., http://192.168.1.100:3001/api)
  * - Production: https://your-domain.com/api
  */
 
