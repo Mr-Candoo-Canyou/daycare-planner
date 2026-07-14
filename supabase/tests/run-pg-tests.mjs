@@ -266,6 +266,21 @@ await test('funder broadcast reaches flagged parents', async () => {
   assert(note.rows[0].n === 1, 'flagged parent notified')
 })
 
+await test('audit details and notification bodies never contain child names', async () => {
+  // IT admins read the audit log but hold no child-level access (§3);
+  // notification bodies travel over SMS. Names are PII leaks in both.
+  const aud = await as(U.will,
+    `select count(*)::int n from audit_log
+     where detail ~* '(maata|sophie|theo|qanatsiaq|tremblay)'`)
+  assert(aud.rows[0].n === 0, `audit rows leaking child names: ${aud.rows[0].n}`)
+  await pg.exec('set role service_role')
+  const ntf = await pg.query(
+    `select count(*)::int n from notifications
+     where body ~* '(maata|sophie|theo|qanatsiaq|tremblay)'`)
+  await pg.exec('reset role')
+  assert(ntf.rows[0].n === 0, `notification bodies leaking child names: ${ntf.rows[0].n}`)
+})
+
 await test('parents cannot read the audit log; IT admin can', async () => {
   const p = await as(U.leah, 'select count(*)::int n from audit_log')
   assert(p.rows[0].n === 0, 'parent sees nothing')

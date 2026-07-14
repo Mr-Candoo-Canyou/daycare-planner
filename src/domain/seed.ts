@@ -377,7 +377,7 @@ export function buildSeed(now = Date.now()): DB {
         id: 'ntf_seed_offer',
         userId: 'u_leah',
         event: 'offer',
-        body: `Sikusiilaq Childcare Centre has offered Maata a spot. Respond by ${new Date(now + 5 * DAY_MS).toLocaleDateString('en-CA')}.`,
+        body: `You have a daycare offer waiting. Sign in to respond by ${new Date(now + 5 * DAY_MS).toLocaleDateString('en-CA')}.`,
         channels: [
           { channel: 'sms', delivered: true },
           { channel: 'push', delivered: true },
@@ -389,7 +389,7 @@ export function buildSeed(now = Date.now()): DB {
     ],
     broadcasts: [],
     audit: [
-      { id: 'aud_seed_1', actor: 'u_admin_sikusiilaq', action: 'offer.created', detail: 'Offer to Maata Qanatsiaq at Sikusiilaq Childcare Centre', at: daysAgo(2, now) },
+      { id: 'aud_seed_1', actor: 'u_admin_sikusiilaq', action: 'offer.created', detail: 'Offer created for child c_maata at Sikusiilaq Childcare Centre', at: daysAgo(2, now) },
       { id: 'aud_seed_0', actor: 'system', action: 'platform.seeded', detail: 'Demo data initialised', at: daysAgo(2, now) },
     ],
     session: { userId: null, grantIndex: 0 },

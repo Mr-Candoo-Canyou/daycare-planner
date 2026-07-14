@@ -15,6 +15,9 @@ several spec'd features missing from the UI, and one waitlist-logic gap.
 
 ## Priority 1 — fix before any real data
 
+> **Status:** all three P1 items fixed (frontend + SQL layer) with a
+> regression test guarding #2/#3 in `supabase/tests/run-pg-tests.mjs`.
+
 | # | Persona | Finding | Recommendation |
 |---|---------|---------|----------------|
 | 1 | Privacy | **Funder CSV export bypasses small-cell suppression.** The dashboard table shows `<5`, but the exported CSV contains the raw counts (observed: `5 5 3 0`). | Run `suppressSmall()` over export rows too — same rule for every egress path (screen, CSV, PDF). One-line fix in `FunderPage.exportCsv`; the SQL `funder_overview()` already suppresses, so the export should read from it rather than recompute. |

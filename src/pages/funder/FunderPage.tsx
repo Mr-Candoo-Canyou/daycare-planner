@@ -27,9 +27,16 @@ export function FunderPage() {
   const flagged = db.users.filter((u) => u.willingToStartDaycare)
 
   const exportCsv = () =>
+    // Small-cell suppression applies to every egress path — screen AND
+    // export (SPEC §4.8; persona review finding #1).
     downloadCsv('idn-aggregate-report.csv', [
       ['daycare', 'licensed_capacity', 'enrolled', 'waitlist'],
-      ...agg.perDaycare.map((p) => [daycareById(db, p.daycareId).name, p.capacity, p.enrolled, p.waitlist]),
+      ...agg.perDaycare.map((p) => [
+        daycareById(db, p.daycareId).name,
+        p.capacity,
+        p.enrolled,
+        suppressSmall(p.waitlist),
+      ]),
     ])
 
   const sendBroadcast = () => {

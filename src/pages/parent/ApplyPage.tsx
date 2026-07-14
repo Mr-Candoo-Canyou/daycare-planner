@@ -88,13 +88,13 @@ export function ApplyPage() {
           notes: [],
         })
       })
-      audit(d, user.id, 'application.submitted', `${child.name}: applied to ${ranked.length} daycare(s)`, now)
+      // IDs in audit detail, no child name in the (SMS-bound) notification.
+      audit(d, user.id, 'application.submitted', `Child ${child.id}: applied to ${ranked.length} daycare(s)`, now)
       notify(
         d,
         user,
         'application',
-        t('apply.confirmNotification', 'Application received for {{child}} — you are on {{count}} waitlist(s). No fee applies.', {
-          child: child.name,
+        t('apply.confirmNotification', 'Application received — you are on {{count}} waitlist(s). No fee applies.', {
           count: ranked.length,
         }),
         now

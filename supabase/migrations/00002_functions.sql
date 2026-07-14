@@ -192,10 +192,13 @@ begin
     values (v_app, v_child, v_daycare, v_rank);
   end loop;
 
+  -- Audit details carry IDs, never child names (IT admins read this log
+  -- but hold no child-level access, SPEC §3); notification bodies go over
+  -- SMS/lock screens, so no names there either.
   perform app.audit('application.submitted',
-    format('%s: applied to %s daycare(s)', p_name, v_rank));
+    format('Child %s: applied to %s daycare(s)', v_child, v_rank));
   perform app.notify(app.uid(), 'application',
-    format('Application received for %s — you are on %s waitlist(s). No fee applies.', p_name, v_rank));
+    format('Application received — you are on %s waitlist(s). No fee applies.', v_rank));
   return v_app;
 end $$;
 
@@ -243,7 +246,6 @@ declare
   v_fee uuid;
   v_retained_count int := 0;
   v_daycare_name text;
-  v_child_name text;
 begin
   select * into v_offer from public.offers where id = p_offer for update;
   if not found or v_offer.status <> 'open' then raise exception 'offer not open'; end if;
@@ -299,9 +301,8 @@ begin
   update public.applications set status = 'enrolled' where id = v_entry.application_id;
 
   select name into v_daycare_name from public.daycares where id = v_offer.daycare_id;
-  select name into v_child_name from public.children where id = v_offer.child_id;
-  perform app.audit('offer.accepted', format('%s enrolled at %s', v_child_name, v_daycare_name));
-  perform app.notify(app.uid(), 'enrolment', format('%s is enrolled at %s.', v_child_name, v_daycare_name));
+  perform app.audit('offer.accepted', format('Child %s enrolled at %s', v_offer.child_id, v_daycare_name));
+  perform app.notify(app.uid(), 'enrolment', 'Enrolment confirmed — sign in for details.');
 end $$;
 
 create function public.decline_offer(p_offer uuid)
@@ -394,7 +395,7 @@ returns uuid language plpgsql security definer set search_path = public, app as 
 declare
   v_entry public.waitlist_entries%rowtype;
   v_offer uuid; v_window int; v_expires timestamptz;
-  v_parent uuid; v_daycare_name text; v_child_name text;
+  v_parent uuid; v_daycare_name text;
 begin
   select * into v_entry from public.waitlist_entries where id = p_entry for update;
   if not found or v_entry.status <> 'active' then raise exception 'entry not active'; end if;
@@ -408,13 +409,14 @@ begin
   values (p_entry, v_entry.child_id, v_entry.daycare_id, v_expires)
   returning id into v_offer;
 
-  select c.parent_user_id, c.name into v_parent, v_child_name
+  select c.parent_user_id into v_parent
     from public.children c where c.id = v_entry.child_id;
   select name into v_daycare_name from public.daycares where id = v_entry.daycare_id;
-  perform app.audit('offer.created', format('Offer to %s at %s', v_child_name, v_daycare_name));
+  perform app.audit('offer.created',
+    format('Offer created for child %s at %s', v_entry.child_id, v_daycare_name));
   perform app.notify(v_parent, 'offer',
-    format('%s has offered %s a spot. Respond by %s.',
-      v_daycare_name, v_child_name, to_char(v_expires at time zone 'America/Iqaluit', 'YYYY-MM-DD')));
+    format('You have a daycare offer waiting. Sign in to respond by %s.',
+      to_char(v_expires at time zone 'America/Iqaluit', 'YYYY-MM-DD')));
   return v_offer;
 end $$;
 

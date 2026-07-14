@@ -8,7 +8,7 @@
   "app.footer": "Iqaluit Daycare Network — community childcare enrollment for Iqaluit, Nunavut.",
   "app.name": "Iqaluit Daycare Network",
   "apply.childSection": "1. About your child",
-  "apply.confirmNotification": "Application received for {{child}} — you are on {{count}} waitlist(s). No fee applies.",
+  "apply.confirmNotification": "Application received — you are on {{count}} waitlist(s). No fee applies.",
   "apply.criteriaNote": "Priority information (community membership, siblings) is self-declared and shared only with the daycares you apply to — never with funders or other daycares. Each daycare applies its own verification offline.",
   "apply.intro": "One application covers every daycare you rank below — free of charge. Each daycare sees only the information relevant to its own centre; none of them see your ranking or where else you applied.",
   "apply.missingField": "Please fill in “{{field}}”.",

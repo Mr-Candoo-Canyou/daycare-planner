@@ -184,13 +184,16 @@ export function makeOffer(db: DB, entryId: string, actor: string, nowIso: string
   }
   db.offers.unshift(offer)
   const daycare = daycareById(db, entry.daycareId)
-  const child = childById(db, entry.childId)
-  audit(db, actor, 'offer.created', `Offer to ${child.name} at ${daycare.name}`, nowIso)
+  // Audit details reference IDs, never child names — IT admins read this
+  // log but hold no child-level access (SPEC §3; persona review #2).
+  audit(db, actor, 'offer.created', `Offer created for child ${entry.childId} at ${daycare.name}`, nowIso)
+  // Notification bodies are pushed over SMS/lock screens: no child or
+  // daycare names — details live in the app (persona review #3).
   notifyParentOfChild(
     db,
     entry.childId,
     'offer',
-    `${daycare.name} has offered ${child.name} a spot. Respond by ${new Date(expiresAt).toLocaleDateString('en-CA')}.`,
+    `You have a daycare offer waiting. Sign in to respond by ${new Date(expiresAt).toLocaleDateString('en-CA')}.`,
     nowIso
   )
   return offer
@@ -288,13 +291,12 @@ export function acceptOffer(
   application.status = 'enrolled'
 
   const daycare = daycareById(db, accepted.daycareId)
-  const child = childById(db, accepted.childId)
-  audit(db, actor, 'offer.accepted', `${child.name} enrolled at ${daycare.name}`, nowIso)
+  audit(db, actor, 'offer.accepted', `Child ${accepted.childId} enrolled at ${daycare.name}`, nowIso)
   notifyParentOfChild(
     db,
     accepted.childId,
     'enrolment',
-    `${child.name} is enrolled at ${daycare.name}.`,
+    'Enrolment confirmed — sign in for details.',
     nowIso
   )
   return {
@@ -311,8 +313,7 @@ export function declineOffer(db: DB, offerId: string, actor: string, nowIso: str
   offer.status = 'declined'
   // A decline never affects standing elsewhere (§4.2.3).
   const daycare = daycareById(db, offer.daycareId)
-  const child = childById(db, offer.childId)
-  audit(db, actor, 'offer.declined', `${child.name} declined ${daycare.name}`, nowIso)
+  audit(db, actor, 'offer.declined', `Child ${offer.childId} declined offer at ${daycare.name}`, nowIso)
 }
 
 // Server-side expiry sweep (§7.3) — the local adapter runs it on every load.
@@ -353,12 +354,11 @@ export function withdraw(
   if (!anyActive && !activeEnrolment(db, application.childId)) {
     application.status = 'withdrawn'
   }
-  const child = childById(db, application.childId)
   audit(
     db,
     actor,
     'application.withdrawn',
-    `${child.name}: withdrew from ${daycareIds ? daycareIds.length : 'all'} waitlist(s)`,
+    `Application ${applicationId}: withdrew from ${daycareIds ? daycareIds.length : 'all'} waitlist(s)`,
     nowIso
   )
 }
