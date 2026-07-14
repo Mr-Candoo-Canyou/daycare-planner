@@ -88,8 +88,13 @@ select cron.schedule('notify', '* * * * *',          -- every minute
 ## 5. The PWA
 
 ```bash
-npm run build        # emits dist/
+VITE_SUPABASE_URL=https://<your-domain> \
+VITE_SUPABASE_ANON_KEY=<anon key from .env> \
+npm run build        # emits dist/ wired to your instance
 ```
+
+(Without the env vars the build is the local-data demo — fine for
+stakeholder previews, wrong for production.)
 
 Serve `dist/` with Caddy (automatic TLS):
 
@@ -101,9 +106,10 @@ idn.example.ca {
 }
 ```
 
-Point the frontend at the instance via build-time env
-(`VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`) once the Supabase adapter
-replaces the local demo adapter — see docs/BACKEND.md for the mapping.
+See docs/BACKEND.md for the adapter architecture and the RPC mapping.
+After deploying, run one smoke pass as each role against the live instance —
+the Supabase adapter is type-checked against the migrations but only a live
+instance exercises PostgREST/GoTrue end to end.
 
 ## 6. Backups & retention (SPEC §7.8)
 

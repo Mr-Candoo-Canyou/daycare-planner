@@ -1,10 +1,8 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
-import { useSession } from '../../auth'
-import { mutate, nowIso } from '../../domain/store'
-import { audit, newId, notify } from '../../domain/waitlist'
-import type { Child, FormField } from '../../domain/types'
+import { backend, useQuery } from '../../backend'
+import type { FormField } from '../../domain/types'
 import { Badge, Button, Card, SectionTitle } from '../../components/ui'
 
 // Unified application (SPEC §4.2.1). The form renders dynamically from the
@@ -12,15 +10,17 @@ import { Badge, Button, Card, SectionTitle } from '../../components/ui'
 // custom fields land in formData.
 export function ApplyPage() {
   const { t } = useTranslation()
-  const { db, user } = useSession()
   const navigate = useNavigate()
+  const schemaQ = useQuery(() => backend.getFormSchema())
+  const daycaresQ = useQuery(() => backend.listDaycares())
   const [values, setValues] = useState<Record<string, string | boolean>>({})
   const [ranked, setRanked] = useState<string[]>([])
   const [error, setError] = useState<string | null>(null)
 
-  if (!user) return null
-  const schema = db.formSchema
-  const openDaycares = db.daycares.filter((d) => d.availability !== 'closed')
+  const schema = schemaQ.data
+  const daycares = daycaresQ.data ?? []
+  if (!schema) return null
+  const openDaycares = daycares.filter((d) => d.availability !== 'closed')
   const available = openDaycares.filter((d) => !ranked.includes(d.id))
 
   const setValue = (id: string, v: string | boolean) => setValues((x) => ({ ...x, [id]: v }))
@@ -35,7 +35,7 @@ export function ApplyPage() {
       return copy
     })
 
-  const submit = () => {
+  const submit = async () => {
     for (const f of schema.fields) {
       if (f.required && !values[f.id]) {
         setError(t('apply.missingField', 'Please fill in “{{field}}”.', { field: f.label }))
@@ -46,11 +46,9 @@ export function ApplyPage() {
       setError(t('apply.noDaycares', 'Add at least one daycare to your ranked list.'))
       return
     }
-    const now = nowIso()
-    mutate((d) => {
-      const child: Child = {
-        id: newId('c'),
-        parentUserId: user.id,
+    const systemIds = ['name', 'dob', 'desiredStartDate', 'indigenous', 'sibling', 'staffChild', 'neighbourhood']
+    try {
+      await backend.submitApplication({
         name: String(values.name ?? ''),
         dob: String(values.dob ?? ''),
         desiredStartDate: String(values.desiredStartDate ?? ''),
@@ -60,47 +58,13 @@ export function ApplyPage() {
           staffChild: !!values.staffChild,
           neighbourhood: !!values.neighbourhood,
         },
-        formData: Object.fromEntries(
-          Object.entries(values).filter(
-            ([k]) => !['name', 'dob', 'desiredStartDate', 'indigenous', 'sibling', 'staffChild', 'neighbourhood'].includes(k)
-          )
-        ),
-        formSchemaVersion: schema.version,
-      }
-      d.children.push(child)
-      const appId = newId('app')
-      d.applications.push({
-        id: appId,
-        childId: child.id,
-        submittedAt: now,
-        status: 'pending',
+        formData: Object.fromEntries(Object.entries(values).filter(([k]) => !systemIds.includes(k))),
         rankedDaycareIds: ranked,
       })
-      ranked.forEach((daycareId, i) => {
-        d.entries.push({
-          id: newId('we'),
-          applicationId: appId,
-          childId: child.id,
-          daycareId,
-          rank: i + 1,
-          dateAdded: now,
-          status: 'active',
-          notes: [],
-        })
-      })
-      // IDs in audit detail, no child name in the (SMS-bound) notification.
-      audit(d, user.id, 'application.submitted', `Child ${child.id}: applied to ${ranked.length} daycare(s)`, now)
-      notify(
-        d,
-        user,
-        'application',
-        t('apply.confirmNotification', 'Application received — you are on {{count}} waitlist(s). No fee applies.', {
-          count: ranked.length,
-        }),
-        now
-      )
-    })
-    navigate('/family')
+      navigate('/family')
+    } catch (e) {
+      setError((e as Error).message)
+    }
   }
 
   return (
@@ -170,7 +134,7 @@ export function ApplyPage() {
         )}
         <ol className="space-y-2">
           {ranked.map((id, i) => {
-            const d = db.daycares.find((x) => x.id === id)!
+            const d = daycares.find((x) => x.id === id)!
             return (
               <li key={id} className="flex items-center justify-between gap-2 rounded-lg border border-slate-200 p-2">
                 <div className="flex items-center gap-2">

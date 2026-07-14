@@ -54,10 +54,10 @@ rules the frontend engine implements live in SECURITY DEFINER functions
 PostgreSQL 18 — parents can't read each other's children, daycares never
 see rankings, funders never see child rows, the audit log is append-only.
 
-Two deliberate seams keep the demo honest with the production design in SPEC §7:
+Every page consumes the `Backend` interface in `src/backend/`; the implementation is selected at build time:
 
-- **Repository interface** — all reads/writes go through `store.ts` + pure functions in `waitlist.ts`. The production build swaps the local adapter for the Supabase client (PostgreSQL + RLS); the cascade/holding-fee/offer rules move into Edge Functions unchanged, because they never touch the storage layer.
-- **Notification dispatch** — `notify()` records an SMS → push → email attempt per user (§4.2.3). Production wires the same call to Twilio and FCM from an Edge Function.
+- **Demo (default):** `src/backend/local.ts` over the in-browser store — what `npm run dev` serves. supabase-js is dead-code-eliminated from this build.
+- **Production:** set `VITE_SUPABASE_URL` + `VITE_SUPABASE_ANON_KEY` at build time and `src/backend/supabase.ts` talks to the self-hosted instance — Supabase Auth (password + magic link), RLS-scoped queries, the RPCs in `supabase/migrations/`, and realtime invalidation for live waitlist positions. See `docs/BACKEND.md`.
 
 Everything user-facing goes through `t('key', '…default…')`; `npm run i18n:extract` regenerates `src/i18n/en.json` from source. Adding Inuktitut later = adding `iu.json`.
 
@@ -67,7 +67,7 @@ The app is an installable PWA (manifest + app-shell service worker). Offline que
 
 | Real | Simulated |
 |---|---|
-| Full waitlist engine: tiers, cascade on acceptance, holding fees, concurrent offers, withdrawal, age-group derivation | Authentication (demo account picker instead of Supabase Auth) |
+| Full waitlist engine: tiers, cascade on acceptance, holding fees, concurrent offers, withdrawal, age-group derivation | Authentication in demo mode (account picker; the production build uses Supabase Auth) |
 | Role scoping in every view (data minimization per §5) | SMS/push/email delivery (recorded per channel, not sent) |
 | Audit log, small-cell suppression, consent-gated outreach flag | Payments (holding fee marked paid on accept) |
 | Configurable application form (versioned schema, no-code editor) | Server-side offer expiry (swept on app load instead of cron) |

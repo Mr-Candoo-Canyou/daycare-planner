@@ -1,41 +1,25 @@
-// Demo authentication for the local adapter. In production this is
-// Supabase Auth (email/password + magic link, SPEC.md §7.5); the session
-// shape — a user with one or more role grants and an active grant index —
-// is what the rest of the app depends on.
+// Session hook over the backend (local demo picker or Supabase Auth —
+// SPEC §7.5). The shape pages consume — user info plus an active role
+// grant — is identical in both modes.
 
-import type { DB, RoleGrant, User } from './domain/types'
-import { mutate, nowIso, useDB } from './domain/store'
-import { audit } from './domain/waitlist'
+import { backend, useQuery } from './backend'
+import type { SessionGrant, SessionInfo } from './backend/types'
 
 export interface Session {
-  db: DB
-  user: User | null
-  grant: RoleGrant | null
+  session: SessionInfo | null
+  grant: SessionGrant | null
+  loading: boolean
 }
 
 export function useSession(): Session {
-  const db = useDB()
-  const user = db.users.find((u) => u.id === db.session.userId) ?? null
-  const grant = user?.grants[db.session.grantIndex] ?? user?.grants[0] ?? null
-  return { db, user, grant }
-}
-
-export function login(userId: string): void {
-  mutate((db) => {
-    db.session = { userId, grantIndex: 0 }
-    audit(db, userId, 'auth.login', 'Signed in (demo)', nowIso())
-  })
-}
-
-export function logout(): void {
-  mutate((db) => {
-    if (db.session.userId) audit(db, db.session.userId, 'auth.logout', 'Signed out', nowIso())
-    db.session = { userId: null, grantIndex: 0 }
-  })
+  const q = useQuery(() => backend.getSession())
+  const session = q.data ?? null
+  const grant = session ? (session.grants[session.grantIndex] ?? session.grants[0] ?? null) : null
+  return { session, grant, loading: q.loading }
 }
 
 // Where each role context lands after sign-in or a context switch.
-export function landingFor(grant: RoleGrant | null): string {
+export function landingFor(grant: SessionGrant | null): string {
   switch (grant?.role) {
     case 'parent':
       return '/family'
@@ -49,11 +33,4 @@ export function landingFor(grant: RoleGrant | null): string {
     default:
       return '/login'
   }
-}
-
-// Explicit role-context switch for accounts with multiple grants (§7.5).
-export function switchGrant(index: number): void {
-  mutate((db) => {
-    db.session.grantIndex = index
-  })
 }

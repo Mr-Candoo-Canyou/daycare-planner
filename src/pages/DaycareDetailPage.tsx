@@ -1,18 +1,18 @@
 import { Link, useParams } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
-import { useDB } from '../domain/store'
-import { enrolledCount, orderedWaitlist } from '../domain/waitlist'
+import { backend, useQuery } from '../backend'
+import type { AgeGroup } from '../domain/types'
 import { Badge, Button, Card, SectionTitle } from '../components/ui'
 import { availabilityBadge } from './DirectoryPage'
 import { useSession } from '../auth'
-import type { AgeGroup } from '../domain/types'
 
 export function DaycareDetailPage() {
   const { t } = useTranslation()
-  const db = useDB()
   const { grant } = useSession()
   const { id } = useParams()
-  const daycare = db.daycares.find((d) => d.id === id)
+  const daycares = useQuery(() => backend.listDaycares())
+  if (daycares.loading) return null
+  const daycare = (daycares.data ?? []).find((d) => d.id === id)
   if (!daycare) return <div>{t('daycare.notFound', 'Daycare not found.')}</div>
 
   const groups: { key: AgeGroup; label: string }[] = [
@@ -73,14 +73,14 @@ export function DaycareDetailPage() {
             <Card key={g.key}>
               <div className="text-sm font-medium text-slate-600">{g.label}</div>
               <div className="mt-1 text-2xl font-bold text-arctic-800">
-                {enrolledCount(db, daycare.id, g.key)} / {daycare.capacity[g.key]}
+                {daycare.enrolledByGroup[g.key]} / {daycare.capacity[g.key]}
               </div>
               <div className="text-xs text-slate-400">{t('daycare.spotsFilled', 'spots filled')}</div>
             </Card>
           ))}
         </div>
         <p className="mt-2 text-xs text-slate-500">
-          {t('daycare.waitlistLength', 'Current waitlist: {{count}} children.', { count: orderedWaitlist(db, daycare.id).length })}
+          {t('daycare.waitlistLength', 'Current waitlist: {{count}} children.', { count: daycare.waitlistCount })}
         </p>
       </div>
 

@@ -1,11 +1,25 @@
-# Backend mapping — local adapter → Supabase
+# Backend mapping — local adapter ↔ Supabase
+
+**Status: both adapters are implemented.** Every page consumes the `Backend`
+interface (`src/backend/types.ts`); `src/backend/index.ts` selects the
+implementation at build time:
+
+- No env vars → `src/backend/local.ts` (in-browser demo over the domain
+  engine; Vite dead-code-eliminates supabase-js from this build).
+- `VITE_SUPABASE_URL` + `VITE_SUPABASE_ANON_KEY` set → `src/backend/supabase.ts`
+  (supabase-js over the RLS schema and RPCs below, Supabase Auth with
+  password + magic-link sign-in, realtime invalidation on offers/entries/
+  notifications per §4.2.2).
 
 The frontend's domain layer (`src/domain/waitlist.ts` + `src/domain/store.ts`)
 and the database layer (`supabase/migrations/`) implement the **same rules
 twice, deliberately**: the TypeScript engine gives the demo and unit tests an
 in-browser backend; the SQL functions are the production authority. Both are
-tested (`npm test` — 20 engine tests; `npm run test:db` — 21 database tests
-covering the same scenarios plus RLS).
+tested (`npm test` — 20 engine tests; `npm run test:db` — 26 database tests
+covering the same scenarios plus RLS). The Supabase adapter itself is
+type-checked against the RPC signatures and column names but has not been
+integration-tested against a live instance — do that on the staging deploy
+(docs/DEPLOYMENT.md) before inviting users.
 
 ## Function mapping
 
@@ -25,25 +39,27 @@ covering the same scenarios plus RLS).
 | `funderAggregates` | `public.funder_overview()` | funder/IT; small cells pre-suppressed |
 | broadcast (FunderPage inline) | `public.send_broadcast(body)` | funder; recipients snapshotted |
 | `notify` (simulated channels) | `notify` Edge Function drains `public.notifications` | service role |
+| flag/unflag an entry | `public.set_entry_flag(entry, bool)` | staff/admin of the daycare |
+| add/read staff notes | `public.add_entry_note`, `public.daycare_entry_notes` | staff/admin of the daycare |
+| tier editor (whole-list save) | `public.set_daycare_tiers(daycare, tiers)` | daycare admin; atomic replace |
+| public directory counts | `public.directory_stats()` | anon-callable definer; counts only |
 
 Plain-table reads (directory, own children, own offers, notifications,
 settings) go through the Supabase client directly — RLS in
 `00003_rls.sql` scopes every row.
 
-## Swapping the adapter
+## Building for each mode
 
-1. `npm i @supabase/supabase-js` and create the client from
-   `VITE_SUPABASE_URL` / `VITE_SUPABASE_ANON_KEY`.
-2. Replace `useDB()`-based reads with queries/RPCs above; subscribe to
-   `waitlist_entries` / `offers` via Supabase Realtime for the live position
-   updates (SPEC §4.2.2).
-3. Replace demo `login()` with `supabase.auth.signInWithPassword` /
-   `signInWithOtp` (magic link, §7.5); role grants come from `role_grants`
-   instead of the seeded user record — the `Session { user, grant }` shape in
-   `src/auth.ts` stays identical.
-4. Delete `src/domain/seed.ts` from the production bundle; the engine in
-   `waitlist.ts` remains as the offline/optimistic layer if desired, but the
-   database functions are authoritative.
+```bash
+npm run build                                    # demo build (local adapter)
+VITE_SUPABASE_URL=https://idn.example.ca \
+VITE_SUPABASE_ANON_KEY=<anon key> npm run build  # production build
+```
+
+Accounts with no role grants are parents (parents self-register; every other
+role is granted by an IT Administrator via `role_grants`). The active role
+context for multi-grant accounts is client-side state; data access is
+enforced per-grant by RLS regardless of the selected context.
 
 ## Design invariants (must survive any refactor)
 

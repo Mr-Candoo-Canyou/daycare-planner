@@ -14,7 +14,9 @@ import { FunderPage } from './pages/funder/FunderPage'
 import { ItAdminPage } from './pages/it/ItAdminPage'
 
 function RequireRole({ roles, children }: { roles: Role[]; children: React.ReactNode }) {
-  const { grant } = useSession()
+  const { grant, loading } = useSession()
+  // Session resolution is async now — don't redirect while it loads.
+  if (loading) return null
   // Signed-in users on a page their active grant can't see are sent to that
   // grant's home, not /login — this also settles the race when a dual-role
   // account switches context while viewing a role-restricted page.

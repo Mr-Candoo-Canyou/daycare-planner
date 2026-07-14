@@ -1,8 +1,7 @@
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useSession } from '../../auth'
-import { mutate, nowIso } from '../../domain/store'
-import { audit, daycareById, funderAggregates, newId, notify, suppressSmall } from '../../domain/waitlist'
+import { backend, useQuery } from '../../backend'
 import { Badge, Button, Card, EmptyState, SectionTitle, Stat } from '../../components/ui'
 
 function downloadCsv(filename: string, rows: (string | number)[][]) {
@@ -15,45 +14,34 @@ function downloadCsv(filename: string, rows: (string | number)[][]) {
 }
 
 // Funder & government dashboard (SPEC §4.8): aggregates only, small cells
-// suppressed; the single identified-data exception is the self-flagged
-// willing-to-start-a-daycare list (§4.8.1).
+// suppressed on every egress path (screen and CSV); the single
+// identified-data exception is the self-flagged willing-to-start list
+// (§4.8.1).
 export function FunderPage() {
   const { t } = useTranslation()
-  const { db, user } = useSession()
+  const { session } = useSession()
+  const overviewQ = useQuery(() => backend.funderOverview(), [session?.userId])
+  const flaggedQ = useQuery(() => backend.listFlaggedParents(), [session?.userId])
+  const broadcastsQ = useQuery(() => backend.listBroadcasts(), [session?.userId])
   const [message, setMessage] = useState('')
-  if (!user) return null
+  if (!session || !overviewQ.data) return null
 
-  const agg = funderAggregates(db, nowIso())
-  const flagged = db.users.filter((u) => u.willingToStartDaycare)
+  const agg = overviewQ.data
+  const flagged = flaggedQ.data ?? []
+  const broadcasts = broadcastsQ.data ?? []
 
   const exportCsv = () =>
-    // Small-cell suppression applies to every egress path — screen AND
-    // export (SPEC §4.8; persona review finding #1).
+    // perDaycare.waitlist is already "<5"-suppressed by the backend, so the
+    // CSV carries the same values as the on-screen table (SPEC §4.8).
     downloadCsv('idn-aggregate-report.csv', [
       ['daycare', 'licensed_capacity', 'enrolled', 'waitlist'],
-      ...agg.perDaycare.map((p) => [
-        daycareById(db, p.daycareId).name,
-        p.capacity,
-        p.enrolled,
-        suppressSmall(p.waitlist),
-      ]),
+      ...agg.perDaycare.map((p) => [p.name, p.capacity, p.enrolled, p.waitlist]),
     ])
 
-  const sendBroadcast = () => {
+  const sendBroadcast = async () => {
     const body = message.trim()
     if (!body) return
-    mutate((d) => {
-      const recipients = d.users.filter((u) => u.willingToStartDaycare)
-      d.broadcasts.unshift({
-        id: newId('bc'),
-        funderUserId: user.id,
-        recipientUserIds: recipients.map((r) => r.id),
-        body,
-        at: nowIso(),
-      })
-      for (const r of recipients) notify(d, r, 'broadcast', body, nowIso())
-      audit(d, user.id, 'broadcast.sent', `Broadcast to ${recipients.length} flagged parent(s)`, nowIso())
-    })
+    await backend.sendBroadcast(body)
     setMessage('')
   }
 
@@ -69,7 +57,7 @@ export function FunderPage() {
         />
         <Stat
           label={t('funder.indigenousShare', 'enrolled children from Indigenous families (where disclosed)')}
-          value={agg.indigenousShareDisclosed}
+          value={agg.indigenousEnrolledDisclosed}
           hint={t('funder.suppressionHint', 'Counts under 5 are shown as “<5” to protect privacy in a small community.')}
         />
       </div>
@@ -94,10 +82,10 @@ export function FunderPage() {
             <tbody>
               {agg.perDaycare.map((p) => (
                 <tr key={p.daycareId} className="border-b border-slate-100">
-                  <td className="py-1.5">{daycareById(db, p.daycareId).name}</td>
+                  <td className="py-1.5">{p.name}</td>
                   <td>{p.capacity}</td>
                   <td>{p.enrolled}</td>
-                  <td>{suppressSmall(p.waitlist)}</td>
+                  <td>{p.waitlist}</td>
                 </tr>
               ))}
             </tbody>
@@ -110,15 +98,15 @@ export function FunderPage() {
             <tbody>
               <tr className="border-b border-slate-100">
                 <td className="py-1.5">{t('ageGroup.infant', 'Infant (0–17 months)')}</td>
-                <td className="text-right font-semibold">{suppressSmall(agg.waitlistByAgeGroup.infant)}</td>
+                <td className="text-right font-semibold">{agg.waitlistByAgeGroup.infant}</td>
               </tr>
               <tr className="border-b border-slate-100">
                 <td className="py-1.5">{t('ageGroup.toddler', 'Toddler (18–35 months)')}</td>
-                <td className="text-right font-semibold">{suppressSmall(agg.waitlistByAgeGroup.toddler)}</td>
+                <td className="text-right font-semibold">{agg.waitlistByAgeGroup.toddler}</td>
               </tr>
               <tr>
                 <td className="py-1.5">{t('ageGroup.preschool', 'Preschool (3–5 years)')}</td>
-                <td className="text-right font-semibold">{suppressSmall(agg.waitlistByAgeGroup.preschool)}</td>
+                <td className="text-right font-semibold">{agg.waitlistByAgeGroup.preschool}</td>
               </tr>
             </tbody>
           </table>
@@ -141,7 +129,7 @@ export function FunderPage() {
           ) : (
             <ul className="space-y-2">
               {flagged.map((u) => (
-                <li key={u.id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-slate-200 p-2 text-sm">
+                <li key={u.email} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-slate-200 p-2 text-sm">
                   <div>
                     <div className="font-medium">{u.name}</div>
                     <div className="text-xs text-slate-500">
@@ -150,7 +138,7 @@ export function FunderPage() {
                     </div>
                   </div>
                   <Badge tone="green">
-                    {t('funder.flaggedSince', 'flagged {{date}}', { date: new Date(u.willingToStartDaycare!).toLocaleDateString('en-CA') })}
+                    {t('funder.flaggedSince', 'flagged {{date}}', { date: new Date(u.flaggedAt).toLocaleDateString('en-CA') })}
                   </Badge>
                 </li>
               ))}
@@ -166,7 +154,7 @@ export function FunderPage() {
           <textarea
             className="w-full rounded-lg border border-slate-300 p-2 text-sm"
             rows={4}
-            placeholder={t('funder.broadcastPh', 'e.g. Invitation: community childcare planning meeting, grants available for new daycare organizations…')}
+            placeholder={t('funder.broadcastPh', 'e.g. Invitation: community childcare planning meeting, grants available for starting new childcare organizations…')}
             value={message}
             onChange={(e) => setMessage(e.target.value)}
           />
@@ -178,11 +166,11 @@ export function FunderPage() {
               {t('funder.broadcastSend', 'Send broadcast')}
             </Button>
           </div>
-          {db.broadcasts.length > 0 && (
+          {broadcasts.length > 0 && (
             <div className="mt-3 border-t border-slate-100 pt-2">
               <div className="mb-1 text-xs font-medium text-slate-500">{t('funder.broadcastHistory', 'Sent messages')}</div>
-              {db.broadcasts.map((b) => (
-                <div key={b.id} className="mb-1 text-xs text-slate-600">
+              {broadcasts.map((b, i) => (
+                <div key={i} className="mb-1 text-xs text-slate-600">
                   <span className="text-slate-400">{new Date(b.at).toLocaleDateString('en-CA')}:</span> {b.body}
                 </div>
               ))}

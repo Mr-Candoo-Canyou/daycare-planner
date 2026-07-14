@@ -302,5 +302,52 @@ await test('mark_ineligible requires a reason and admin grant', async () => {
   assert(st.rows[0].status === 'ineligible', 'marked')
 })
 
+await test('staff can write and read entry notes (RLS via definer helper)', async () => {
+  const r = await as(U.marc, `select public.submit_application(
+    'Pia Tremblay', '2024-05-01', '2026-09-01', '{}', '{}', array['${AAKULUK}']::uuid[]) as id`)
+  const entry = await as(U.marc, `select id from waitlist_entries where application_id='${r.rows[0].id}'`)
+  await as(U.josh, `select public.add_entry_note('${entry.rows[0].id}', 'called family, confirmed start date')`)
+  const read = await as(U.josh, `select count(*)::int n from public.daycare_entry_notes('${AAKULUK}')`)
+  assert(read.rows[0].n === 1, 'staff reads the note back')
+  const direct = await as(U.josh, `select count(*)::int n from entry_notes`)
+  assert(direct.rows[0].n === 1, 'direct select works under fixed policy')
+  const parent = await as(U.marc, `select count(*)::int n from entry_notes`)
+  assert(parent.rows[0].n === 0, 'parents never see staff notes')
+})
+
+await test('set_entry_flag works for staff, rejected for parents', async () => {
+  const entry = await as(U.marc, `select id from waitlist_entries where status='active' limit 1`)
+  await as(U.josh, `select public.set_entry_flag('${entry.rows[0].id}', true)`)
+  const flagged = await as(U.marc, `select flagged from waitlist_entries where id='${entry.rows[0].id}'`)
+  assert(flagged.rows[0].flagged === true, 'flag set')
+  await expectError(as(U.marc, `select public.set_entry_flag('${entry.rows[0].id}', false)`), 'not your daycare')
+})
+
+await test('anon can read directory stats but no underlying rows', async () => {
+  await pg.exec(`set role anon; select set_config('test.uid','',false);`)
+  const stats = await pg.query('select * from public.directory_stats()')
+  const enr = await pg.query('select count(*)::int n from enrolments')
+  await pg.exec('reset role')
+  assert(stats.rows.length === 3, 'stats for all daycares')
+  const total = stats.rows.reduce((s, r) => s + Number(r.enrolled), 0)
+  assert(total >= 1, 'enrolled counts flow through')
+  assert(enr.rows[0].n === 0, 'anon sees zero enrolment rows directly')
+})
+
+await test('set_daycare_tiers replaces atomically, admin-only', async () => {
+  await expectError(
+    as(U.josh, `select public.set_daycare_tiers('${AAKULUK}', '[]'::jsonb)`),
+    'admin'
+  )
+  await as(U.rhoda, `select public.set_daycare_tiers('${AAKULUK}',
+    '[{"kind":"staff_child","label":"Staff kids"},{"kind":"general","label":"Everyone"}]'::jsonb)`)
+  const tiers = await as(U.rhoda, `select label from daycare_tiers where daycare_id='${AAKULUK}' order by sort_order`)
+  assert(tiers.rows.length === 2 && tiers.rows[0].label === 'Staff kids', 'tiers replaced in order')
+  await expectError(
+    as(U.rhoda, `select public.set_daycare_tiers('${AAKULUK}', '[]'::jsonb)`),
+    'at least one tier'
+  )
+})
+
 console.log(`\n${passed} passed, ${failed} failed`)
 process.exit(failed ? 1 : 0)

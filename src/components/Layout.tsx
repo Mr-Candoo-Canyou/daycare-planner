@@ -1,12 +1,12 @@
 import { useState } from 'react'
 import { Link, NavLink, useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
-import { landingFor, logout, switchGrant, useSession } from '../auth'
-import { resetDemo } from '../domain/store'
-import type { RoleGrant } from '../domain/types'
+import { landingFor, useSession } from '../auth'
+import { backend, useQuery } from '../backend'
+import type { SessionGrant } from '../backend/types'
 import { Badge } from './ui'
 
-function roleLabel(t: (k: string, d: string) => string, grant: RoleGrant): string {
+function roleLabel(t: (k: string, d: string) => string, grant: SessionGrant): string {
   switch (grant.role) {
     case 'parent':
       return t('role.parent', 'Parent')
@@ -23,24 +23,25 @@ function roleLabel(t: (k: string, d: string) => string, grant: RoleGrant): strin
 
 export function Layout({ children }: { children: React.ReactNode }) {
   const { t } = useTranslation()
-  const { db, user, grant } = useSession()
+  const { session, grant } = useSession()
   const navigate = useNavigate()
   const [menuOpen, setMenuOpen] = useState(false)
-
-  const unread = user ? db.notifications.filter((n) => n.userId === user.id && !n.read).length : 0
-  const grantDaycare = grant?.daycareId ? db.daycares.find((d) => d.id === grant.daycareId) : null
+  const unreadQ = useQuery(() => (session ? backend.unreadCount() : Promise.resolve(0)), [session?.userId])
+  const unread = unreadQ.data ?? 0
 
   const navClass = ({ isActive }: { isActive: boolean }) =>
     `rounded-lg px-3 py-1.5 text-sm font-medium ${isActive ? 'bg-arctic-800 text-white' : 'text-arctic-100 hover:bg-arctic-600'}`
 
   return (
     <div className="min-h-screen">
-      <div className="bg-amber-100 px-4 py-1.5 text-center text-xs text-amber-900">
-        {t('demo.banner', 'Demo mode — local sample data, no real families. The production build connects to self-hosted Supabase (SPEC §7).')}{' '}
-        <button className="font-semibold underline" onClick={() => resetDemo()}>
-          {t('demo.reset', 'Reset demo data')}
-        </button>
-      </div>
+      {backend.mode === 'local' && (
+        <div className="bg-amber-100 px-4 py-1.5 text-center text-xs text-amber-900">
+          {t('demo.banner', 'Demo mode — local sample data, no real families. The production build connects to self-hosted Supabase (SPEC §7).')}{' '}
+          <button className="font-semibold underline" onClick={() => backend.resetDemo()}>
+            {t('demo.reset', 'Reset demo data')}
+          </button>
+        </div>
+      )}
       <header className="bg-arctic-700">
         <div className="mx-auto flex max-w-6xl flex-wrap items-center gap-2 px-4 py-3">
           <Link to="/" className="mr-2 flex items-center gap-2 text-white">
@@ -82,7 +83,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
               </NavLink>
             )}
           </nav>
-          {user ? (
+          {session ? (
             <div className="relative flex items-center gap-2">
               {grant?.role === 'parent' && (
                 <Link to="/notifications" className="relative rounded-lg px-2 py-1 text-arctic-100 hover:bg-arctic-600" aria-label={t('nav.notifications', 'Notifications')}>
@@ -96,41 +97,41 @@ export function Layout({ children }: { children: React.ReactNode }) {
                 className="flex items-center gap-2 rounded-lg bg-arctic-800 px-3 py-1.5 text-sm text-white hover:bg-arctic-900"
                 onClick={() => setMenuOpen((v) => !v)}
               >
-                <span>{user.name}</span>
+                <span>{session.name}</span>
                 {grant && (
                   <Badge tone="arctic">
                     {roleLabel(t, grant)}
-                    {grantDaycare ? ` · ${grantDaycare.name}` : ''}
+                    {grant.daycareName ? ` · ${grant.daycareName}` : ''}
                   </Badge>
                 )}
               </button>
               {menuOpen && (
                 <div className="absolute right-0 top-full z-40 mt-1 w-64 rounded-xl border border-slate-200 bg-white p-2 shadow-lg">
-                  {user.grants.length > 1 && (
+                  {session.grants.length > 1 && (
                     <div className="mb-1 border-b border-slate-100 pb-1">
                       <div className="px-2 py-1 text-xs font-medium text-slate-400">
                         {t('session.switchRole', 'Switch role context')}
                       </div>
-                      {user.grants.map((g, i) => (
+                      {session.grants.map((g, i) => (
                         <button
                           key={i}
-                          className={`block w-full rounded-lg px-2 py-1.5 text-left text-sm ${i === db.session.grantIndex ? 'bg-arctic-50 font-semibold text-arctic-800' : 'hover:bg-slate-50'}`}
-                          onClick={() => {
-                            switchGrant(i)
+                          className={`block w-full rounded-lg px-2 py-1.5 text-left text-sm ${i === session.grantIndex ? 'bg-arctic-50 font-semibold text-arctic-800' : 'hover:bg-slate-50'}`}
+                          onClick={async () => {
+                            await backend.setActiveGrant(i)
                             setMenuOpen(false)
                             navigate(landingFor(g))
                           }}
                         >
                           {roleLabel(t, g)}
-                          {g.daycareId ? ` — ${db.daycares.find((d) => d.id === g.daycareId)?.name}` : ''}
+                          {g.daycareName ? ` — ${g.daycareName}` : ''}
                         </button>
                       ))}
                     </div>
                   )}
                   <button
                     className="block w-full rounded-lg px-2 py-1.5 text-left text-sm hover:bg-slate-50"
-                    onClick={() => {
-                      logout()
+                    onClick={async () => {
+                      await backend.signOut()
                       setMenuOpen(false)
                       navigate('/')
                     }}

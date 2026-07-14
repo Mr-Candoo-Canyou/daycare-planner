@@ -1,20 +1,8 @@
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useSession } from '../../auth'
-import { mutate, nowIso } from '../../domain/store'
-import {
-  ageGroupFor,
-  childById,
-  daycareById,
-  markIneligible,
-  makeOffer,
-  moveEntry,
-  nextEligible,
-  openSpots,
-  orderedWaitlist,
-  tierIndexFor,
-} from '../../domain/waitlist'
-import type { WaitlistEntry } from '../../domain/types'
+import { backend, useQuery } from '../../backend'
+import type { WaitlistRow } from '../../backend/types'
 import { Badge, Button, Card, EmptyState, Modal, SectionTitle, Stat } from '../../components/ui'
 
 // Daycare waitlist management (SPEC §4.3). Staff see the list and can add
@@ -23,19 +11,21 @@ import { Badge, Button, Card, EmptyState, Modal, SectionTitle, Stat } from '../.
 // never shown — data minimization (§5).
 export function WaitlistPage() {
   const { t } = useTranslation()
-  const { db, user, grant } = useSession()
-  const [noteFor, setNoteFor] = useState<WaitlistEntry | null>(null)
+  const { grant, session } = useSession()
+  const daycareId = grant?.daycareId
+  const q = useQuery(
+    () => (daycareId ? backend.getDaycareWaitlist(daycareId) : Promise.resolve(null)),
+    [daycareId]
+  )
+  const [noteFor, setNoteFor] = useState<WaitlistRow | null>(null)
   const [noteText, setNoteText] = useState('')
-  const [ineligibleFor, setIneligibleFor] = useState<WaitlistEntry | null>(null)
+  const [ineligibleFor, setIneligibleFor] = useState<WaitlistRow | null>(null)
   const [ineligibleReason, setIneligibleReason] = useState('')
 
-  if (!grant?.daycareId || !user) return null
-  const daycare = daycareById(db, grant.daycareId)
+  if (!daycareId || !session || !q.data) return null
   const isAdmin = grant.role === 'daycare_admin'
-  const list = orderedWaitlist(db, daycare.id)
-  const spots = openSpots(db, daycare.id)
-  const next = nextEligible(db, daycare.id)
-  const now = new Date().toISOString()
+  const { rows, openSpots, openOffers } = q.data
+  const next = rows.find((r) => !r.hasOpenOffer) ?? null
 
   const ageLabel: Record<string, string> = {
     infant: t('ageGroup.infantShort', 'Infant'),
@@ -46,18 +36,15 @@ export function WaitlistPage() {
   return (
     <div>
       <SectionTitle>
-        {t('waitlist.title', 'Waitlist — {{daycare}}', { daycare: daycare.name })}
+        {t('waitlist.title', 'Waitlist — {{daycare}}', { daycare: grant.daycareName ?? '' })}
       </SectionTitle>
       <div className="mb-4 flex flex-wrap gap-3">
-        <Stat label={t('waitlist.statWaiting', 'children waiting')} value={list.length} />
+        <Stat label={t('waitlist.statWaiting', 'children waiting')} value={rows.length} />
         <Stat
           label={t('waitlist.statSpots', 'open spots (capacity minus enrolled and pending offers)')}
-          value={spots}
+          value={openSpots}
         />
-        <Stat
-          label={t('waitlist.statOffers', 'offers awaiting a reply')}
-          value={db.offers.filter((o) => o.daycareId === daycare.id && o.status === 'open').length}
-        />
+        <Stat label={t('waitlist.statOffers', 'offers awaiting a reply')} value={openOffers} />
       </div>
 
       {isAdmin && (
@@ -67,21 +54,18 @@ export function WaitlistPage() {
               {next ? (
                 <>
                   {t('waitlist.nextEligible', 'Next eligible child per your priority rules:')}{' '}
-                  <span className="font-semibold">{childById(db, next.childId).name}</span>{' '}
-                  <Badge tone="arctic">{daycare.tiers[tierIndexFor(daycare, childById(db, next.childId))]?.label ?? t('waitlist.noTier', 'Unmatched')}</Badge>
+                  <span className="font-semibold">{next.childName}</span>{' '}
+                  <Badge tone="arctic">{next.tierLabel || t('waitlist.noTier', 'Unmatched')}</Badge>
                 </>
               ) : (
                 t('waitlist.noneEligible', 'No eligible children without a pending offer.')
               )}
             </div>
-            <Button
-              disabled={!next || spots === 0}
-              onClick={() => next && mutate((d) => makeOffer(d, next.id, user.id, nowIso()))}
-            >
+            <Button disabled={!next || openSpots === 0} onClick={() => next && backend.makeOffer(next.entryId)}>
               {t('waitlist.makeOffer', 'Offer the spot')}
             </Button>
           </div>
-          {spots === 0 && (
+          {openSpots === 0 && (
             <p className="mt-1 text-xs text-slate-500">
               {t('waitlist.noSpots', 'No open spots right now — offers unlock when capacity frees up.')}
             </p>
@@ -89,7 +73,7 @@ export function WaitlistPage() {
         </Card>
       )}
 
-      {list.length === 0 ? (
+      {rows.length === 0 ? (
         <EmptyState>{t('waitlist.empty', 'The waitlist is empty.')}</EmptyState>
       ) : (
         <Card>
@@ -106,80 +90,66 @@ export function WaitlistPage() {
               </tr>
             </thead>
             <tbody>
-              {list.map((e, i) => {
-                const child = childById(db, e.childId)
-                const tier = daycare.tiers[tierIndexFor(daycare, child)]
-                const hasOpenOffer = db.offers.some((o) => o.waitlistEntryId === e.id && o.status === 'open')
-                return (
-                  <tr key={e.id} className="border-b border-slate-100 align-top">
-                    <td className="py-2 font-semibold text-arctic-800">{i + 1}</td>
-                    <td>
-                      <div className="font-medium">{child.name}</div>
-                      {e.notes.length > 0 && (
-                        <div className="mt-0.5 text-xs text-slate-500">
-                          {e.notes.map((n, j) => (
-                            <div key={j}>💬 {n.text}</div>
-                          ))}
-                        </div>
-                      )}
-                    </td>
-                    <td>{ageLabel[ageGroupFor(child.dob, now)]}</td>
-                    <td>
-                      <Badge tone="arctic">{tier?.label ?? t('waitlist.noTier', 'Unmatched')}</Badge>
-                    </td>
-                    <td className="whitespace-nowrap">{new Date(e.dateAdded).toLocaleDateString('en-CA')}</td>
-                    <td>
-                      {hasOpenOffer && <Badge tone="green">{t('waitlist.offerPending', 'Offer out')}</Badge>}
-                      {e.flagged && <Badge tone="amber">{t('waitlist.flagged', 'Flagged')}</Badge>}
-                    </td>
-                    <td className="whitespace-nowrap text-right">
-                      {isAdmin && (
-                        <>
-                          <Button variant="secondary" className="mr-1 px-2" onClick={() => mutate((d) => moveEntry(d, daycare.id, e.id, -1, user.id, nowIso()))}>
-                            ↑
-                          </Button>
-                          <Button variant="secondary" className="mr-1 px-2" onClick={() => mutate((d) => moveEntry(d, daycare.id, e.id, 1, user.id, nowIso()))}>
-                            ↓
-                          </Button>
-                        </>
-                      )}
+              {rows.map((e, i) => (
+                <tr key={e.entryId} className="border-b border-slate-100 align-top">
+                  <td className="py-2 font-semibold text-arctic-800">{i + 1}</td>
+                  <td>
+                    <div className="font-medium">{e.childName}</div>
+                    {e.notes.length > 0 && (
+                      <div className="mt-0.5 text-xs text-slate-500">
+                        {e.notes.map((n, j) => (
+                          <div key={j}>💬 {n}</div>
+                        ))}
+                      </div>
+                    )}
+                  </td>
+                  <td>{ageLabel[e.ageGroup]}</td>
+                  <td>
+                    <Badge tone="arctic">{e.tierLabel || t('waitlist.noTier', 'Unmatched')}</Badge>
+                  </td>
+                  <td className="whitespace-nowrap">{new Date(e.dateAdded).toLocaleDateString('en-CA')}</td>
+                  <td>
+                    {e.hasOpenOffer && <Badge tone="green">{t('waitlist.offerPending', 'Offer out')}</Badge>}
+                    {e.flagged && <Badge tone="amber">{t('waitlist.flagged', 'Flagged')}</Badge>}
+                  </td>
+                  <td className="whitespace-nowrap text-right">
+                    {isAdmin && (
+                      <>
+                        <Button variant="secondary" className="mr-1 px-2" onClick={() => backend.moveEntry(daycareId, e.entryId, -1)}>
+                          ↑
+                        </Button>
+                        <Button variant="secondary" className="mr-1 px-2" onClick={() => backend.moveEntry(daycareId, e.entryId, 1)}>
+                          ↓
+                        </Button>
+                      </>
+                    )}
+                    <Button
+                      variant="secondary"
+                      className="mr-1"
+                      onClick={() => {
+                        setNoteFor(e)
+                        setNoteText('')
+                      }}
+                    >
+                      {t('waitlist.note', 'Note')}
+                    </Button>
+                    <Button variant="secondary" className="mr-1" onClick={() => backend.setEntryFlag(e.entryId, !e.flagged)}>
+                      {e.flagged ? t('waitlist.unflag', 'Unflag') : t('waitlist.flag', 'Flag')}
+                    </Button>
+                    {isAdmin && (
                       <Button
-                        variant="secondary"
-                        className="mr-1"
+                        variant="danger"
                         onClick={() => {
-                          setNoteFor(e)
-                          setNoteText('')
+                          setIneligibleFor(e)
+                          setIneligibleReason('')
                         }}
                       >
-                        {t('waitlist.note', 'Note')}
+                        {t('waitlist.ineligible', 'Ineligible')}
                       </Button>
-                      <Button
-                        variant="secondary"
-                        className="mr-1"
-                        onClick={() =>
-                          mutate((d) => {
-                            const x = d.entries.find((y) => y.id === e.id)!
-                            x.flagged = !x.flagged
-                          })
-                        }
-                      >
-                        {e.flagged ? t('waitlist.unflag', 'Unflag') : t('waitlist.flag', 'Flag')}
-                      </Button>
-                      {isAdmin && (
-                        <Button
-                          variant="danger"
-                          onClick={() => {
-                            setIneligibleFor(e)
-                            setIneligibleReason('')
-                          }}
-                        >
-                          {t('waitlist.ineligible', 'Ineligible')}
-                        </Button>
-                      )}
-                    </td>
-                  </tr>
-                )
-              })}
+                    )}
+                  </td>
+                </tr>
+              ))}
             </tbody>
           </table>
           <p className="mt-2 text-xs text-slate-500">
@@ -192,7 +162,7 @@ export function WaitlistPage() {
       )}
 
       {noteFor && (
-        <Modal title={t('waitlist.noteTitle', 'Add note for {{child}}', { child: childById(db, noteFor.childId).name })} onClose={() => setNoteFor(null)}>
+        <Modal title={t('waitlist.noteTitle', 'Add note for {{child}}', { child: noteFor.childName })} onClose={() => setNoteFor(null)}>
           <textarea
             className="w-full rounded-lg border border-slate-300 p-2 text-sm"
             rows={3}
@@ -205,11 +175,8 @@ export function WaitlistPage() {
             </Button>
             <Button
               disabled={!noteText.trim()}
-              onClick={() => {
-                mutate((d) => {
-                  const x = d.entries.find((y) => y.id === noteFor.id)!
-                  x.notes.push({ by: user.id, text: noteText.trim(), at: nowIso() })
-                })
+              onClick={async () => {
+                await backend.addEntryNote(noteFor.entryId, noteText.trim())
                 setNoteFor(null)
               }}
             >
@@ -221,7 +188,7 @@ export function WaitlistPage() {
 
       {ineligibleFor && (
         <Modal
-          title={t('waitlist.ineligibleTitle', 'Mark {{child}} ineligible', { child: childById(db, ineligibleFor.childId).name })}
+          title={t('waitlist.ineligibleTitle', 'Mark {{child}} ineligible', { child: ineligibleFor.childName })}
           onClose={() => setIneligibleFor(null)}
         >
           <p className="text-sm text-slate-600">
@@ -240,8 +207,8 @@ export function WaitlistPage() {
             <Button
               variant="danger"
               disabled={!ineligibleReason.trim()}
-              onClick={() => {
-                mutate((d) => markIneligible(d, ineligibleFor.id, ineligibleReason.trim(), user.id, nowIso()))
+              onClick={async () => {
+                await backend.markIneligible(ineligibleFor.entryId, ineligibleReason.trim())
                 setIneligibleFor(null)
               }}
             >

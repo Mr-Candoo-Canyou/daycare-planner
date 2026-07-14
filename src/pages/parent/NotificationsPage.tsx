@@ -1,32 +1,36 @@
 import { useTranslation } from 'react-i18next'
 import { useSession } from '../../auth'
-import { mutate } from '../../domain/store'
+import { backend, useQuery } from '../../backend'
 import { Badge, Card, EmptyState, SectionTitle } from '../../components/ui'
 
 // Notification history with per-channel delivery (SPEC §4.2.3): priority
 // SMS → push → email, all channels attempted for critical events.
 export function NotificationsPage() {
   const { t } = useTranslation()
-  const { db, user } = useSession()
-  if (!user) return null
-  const mine = db.notifications.filter((n) => n.userId === user.id)
+  const { session } = useSession()
+  const q = useQuery(() => backend.listMyNotifications(), [session?.userId])
+  if (!session) return null
+  const mine = q.data ?? []
 
-  const markAllRead = () =>
-    mutate((d) => {
-      for (const n of d.notifications) if (n.userId === user.id) n.read = true
-    })
+  const channelBadge = (channel: string, ok: boolean) => {
+    if (channel === 'sms') return ok ? t('channel.smsOk', 'SMS ✓') : t('channel.smsNo', 'SMS —')
+    if (channel === 'push') return ok ? t('channel.pushOk', 'Push ✓') : t('channel.pushNo', 'Push —')
+    return ok ? t('channel.emailOk', 'Email ✓') : t('channel.emailNo', 'Email —')
+  }
 
   return (
     <div className="mx-auto max-w-2xl">
       <div className="flex items-center justify-between">
         <SectionTitle>{t('notifications.title', 'Notifications')}</SectionTitle>
         {mine.some((n) => !n.read) && (
-          <button className="text-sm text-arctic-600 underline" onClick={markAllRead}>
+          <button className="text-sm text-arctic-600 underline" onClick={() => backend.markNotificationsRead()}>
             {t('notifications.markRead', 'Mark all read')}
           </button>
         )}
       </div>
-      {mine.length === 0 && <EmptyState>{t('notifications.empty', 'Nothing yet — offers and reminders will appear here.')}</EmptyState>}
+      {!q.loading && mine.length === 0 && (
+        <EmptyState>{t('notifications.empty', 'Nothing yet — offers and reminders will appear here.')}</EmptyState>
+      )}
       <div className="space-y-2">
         {mine.map((n) => (
           <Card key={n.id} className={n.read ? 'opacity-70' : ''}>
@@ -35,9 +39,7 @@ export function NotificationsPage() {
               <span>{new Date(n.at).toLocaleString('en-CA')}</span>
               {n.channels.map((c) => (
                 <Badge key={c.channel} tone={c.delivered ? 'green' : 'slate'}>
-                  {c.channel === 'sms' && (c.delivered ? t('channel.smsOk', 'SMS ✓') : t('channel.smsNo', 'SMS —'))}
-                  {c.channel === 'push' && (c.delivered ? t('channel.pushOk', 'Push ✓') : t('channel.pushNo', 'Push —'))}
-                  {c.channel === 'email' && (c.delivered ? t('channel.emailOk', 'Email ✓') : t('channel.emailNo', 'Email —'))}
+                  {channelBadge(c.channel, c.delivered)}
                 </Badge>
               ))}
             </div>

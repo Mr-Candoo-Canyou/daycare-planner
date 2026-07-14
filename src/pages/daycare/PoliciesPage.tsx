@@ -1,21 +1,25 @@
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useSession } from '../../auth'
-import { mutate, nowIso } from '../../domain/store'
-import { audit, daycareById, newId } from '../../domain/waitlist'
-import type { TierKind } from '../../domain/types'
+import { backend, useQuery } from '../../backend'
+import type { Tier, TierKind } from '../../domain/types'
 import { Badge, Button, Card, SectionTitle } from '../../components/ui'
 
 // Priority rule configuration from platform templates (SPEC §4.3):
 // combine, reorder, relabel tiers, or add custom tiers from scratch.
+// Every change is saved as a whole-list replace (atomic on the backend).
 export function PoliciesPage() {
   const { t } = useTranslation()
-  const { db, user, grant } = useSession()
+  const { grant, session } = useSession()
+  const daycareId = grant?.daycareId
+  const tiersQ = useQuery(() => (daycareId ? backend.getTiers(daycareId) : Promise.resolve([])), [daycareId])
+  const templatesQ = useQuery(() => backend.listTemplates())
   const [customLabel, setCustomLabel] = useState('')
   const [customKind, setCustomKind] = useState<TierKind>('general')
 
-  if (!grant?.daycareId || !user) return null
-  const daycare = daycareById(db, grant.daycareId)
+  if (!daycareId || !session) return null
+  const tiers = tiersQ.data ?? []
+  const templates = templatesQ.data ?? []
 
   const kindLabel: Record<TierKind, string> = {
     sibling: t('tierKind.sibling', 'Matches: sibling enrolled'),
@@ -25,15 +29,15 @@ export function PoliciesPage() {
     general: t('tierKind.general', 'Matches: everyone (catch-all)'),
   }
 
-  const act = (action: string, detail: string, fn: (d: typeof db) => void) =>
-    mutate((d) => {
-      fn(d)
-      audit(d, user.id, action, detail, nowIso())
-    })
+  const save = (next: Omit<Tier, 'id'>[]) =>
+    backend.saveTiers(daycareId, next.map(({ kind, label, description }) => ({ kind, label, description })))
+
+  const asPlain = (list: Tier[]): Omit<Tier, 'id'>[] =>
+    list.map(({ kind, label, description }) => ({ kind, label, description }))
 
   return (
     <div className="mx-auto max-w-3xl">
-      <SectionTitle>{t('policies.title', 'Priority rules — {{daycare}}', { daycare: daycare.name })}</SectionTitle>
+      <SectionTitle>{t('policies.title', 'Priority rules — {{daycare}}', { daycare: grant.daycareName ?? '' })}</SectionTitle>
       <p className="mb-4 text-sm text-slate-600">
         {t(
           'policies.intro',
@@ -44,20 +48,21 @@ export function PoliciesPage() {
       <Card>
         <h3 className="mb-2 font-semibold text-arctic-800">{t('policies.currentTiers', 'Your tiers (highest priority first)')}</h3>
         <ol className="space-y-2">
-          {daycare.tiers.map((tier, i) => (
+          {tiers.map((tier, i) => (
             <li key={tier.id} className="flex items-center justify-between gap-2 rounded-lg border border-slate-200 p-2">
               <div className="flex items-center gap-2">
                 <Badge tone="arctic">#{i + 1}</Badge>
                 <div>
                   <input
                     className="rounded border border-transparent px-1 text-sm font-medium hover:border-slate-300"
-                    value={tier.label}
-                    onChange={(e) =>
-                      mutate((d) => {
-                        const dc = daycareById(d, daycare.id)
-                        dc.tiers[i].label = e.target.value
-                      })
-                    }
+                    defaultValue={tier.label}
+                    onBlur={(e) => {
+                      if (e.target.value.trim() && e.target.value !== tier.label) {
+                        const next = asPlain(tiers)
+                        next[i] = { ...next[i], label: e.target.value.trim() }
+                        save(next)
+                      }
+                    }}
                   />
                   <div className="px-1 text-xs text-slate-400">{kindLabel[tier.kind]}</div>
                 </div>
@@ -66,36 +71,29 @@ export function PoliciesPage() {
                 <Button
                   variant="secondary"
                   disabled={i === 0}
-                  onClick={() =>
-                    act('policy.reordered', `Tier moved at ${daycare.name}`, (d) => {
-                      const ts = daycareById(d, daycare.id).tiers
-                      ;[ts[i - 1], ts[i]] = [ts[i], ts[i - 1]]
-                    })
-                  }
+                  onClick={() => {
+                    const next = asPlain(tiers)
+                    ;[next[i - 1], next[i]] = [next[i], next[i - 1]]
+                    save(next)
+                  }}
                 >
                   ↑
                 </Button>
                 <Button
                   variant="secondary"
-                  disabled={i === daycare.tiers.length - 1}
-                  onClick={() =>
-                    act('policy.reordered', `Tier moved at ${daycare.name}`, (d) => {
-                      const ts = daycareById(d, daycare.id).tiers
-                      ;[ts[i], ts[i + 1]] = [ts[i + 1], ts[i]]
-                    })
-                  }
+                  disabled={i === tiers.length - 1}
+                  onClick={() => {
+                    const next = asPlain(tiers)
+                    ;[next[i], next[i + 1]] = [next[i + 1], next[i]]
+                    save(next)
+                  }}
                 >
                   ↓
                 </Button>
                 <Button
                   variant="danger"
-                  disabled={daycare.tiers.length === 1}
-                  onClick={() =>
-                    act('policy.tierRemoved', `Tier "${tier.label}" removed at ${daycare.name}`, (d) => {
-                      const dc = daycareById(d, daycare.id)
-                      dc.tiers = dc.tiers.filter((x) => x.id !== tier.id)
-                    })
-                  }
+                  disabled={tiers.length === 1}
+                  onClick={() => save(asPlain(tiers).filter((_, j) => j !== i))}
                 >
                   ✕
                 </Button>
@@ -111,23 +109,19 @@ export function PoliciesPage() {
       <Card className="mt-4">
         <h3 className="mb-2 font-semibold text-arctic-800">{t('policies.templates', 'Add from platform templates')}</h3>
         <div className="grid gap-2 sm:grid-cols-2">
-          {db.templates.map((tpl) => (
+          {templates.map((tpl) => (
             <div key={tpl.id} className="rounded-lg border border-slate-200 p-3">
               <div className="text-sm font-medium">{tpl.name}</div>
               <div className="mb-2 text-xs text-slate-500">{tpl.description}</div>
               <Button
                 variant="secondary"
-                onClick={() =>
-                  act('policy.templateAdded', `Template "${tpl.name}" added at ${daycare.name}`, (d) => {
-                    const dc = daycareById(d, daycare.id)
-                    for (const tier of tpl.tiers) {
-                      dc.tiers.splice(dc.tiers.length - (dc.tiers.at(-1)?.kind === 'general' ? 1 : 0), 0, {
-                        ...tier,
-                        id: newId('t'),
-                      })
-                    }
-                  })
-                }
+                onClick={() => {
+                  // Insert template tiers just above a trailing catch-all.
+                  const next = asPlain(tiers)
+                  const at = next.at(-1)?.kind === 'general' ? next.length - 1 : next.length
+                  next.splice(at, 0, ...tpl.tiers)
+                  save(next)
+                }}
               >
                 {t('policies.addTemplate', 'Add tiers')}
               </Button>
@@ -164,9 +158,7 @@ export function PoliciesPage() {
           <Button
             disabled={!customLabel.trim()}
             onClick={() => {
-              act('policy.tierAdded', `Custom tier "${customLabel}" at ${daycare.name}`, (d) => {
-                daycareById(d, daycare.id).tiers.unshift({ id: newId('t'), kind: customKind, label: customLabel.trim() })
-              })
+              save([{ kind: customKind, label: customLabel.trim() }, ...asPlain(tiers)])
               setCustomLabel('')
             }}
           >

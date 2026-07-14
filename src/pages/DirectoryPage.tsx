@@ -1,11 +1,10 @@
 import { Link } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
-import { useDB } from '../domain/store'
-import { enrolledCount, orderedWaitlist } from '../domain/waitlist'
+import { backend, useQuery } from '../backend'
+import type { DaycareCard } from '../backend/types'
 import { Badge, Card } from '../components/ui'
-import type { Daycare } from '../domain/types'
 
-export function availabilityBadge(t: (k: string, d: string) => string, d: Daycare) {
+export function availabilityBadge(t: (k: string, d: string) => string, d: Pick<DaycareCard, 'availability'>) {
   switch (d.availability) {
     case 'open':
       return <Badge tone="green">{t('availability.open', 'Open')}</Badge>
@@ -19,7 +18,7 @@ export function availabilityBadge(t: (k: string, d: string) => string, d: Daycar
 // Public directory (SPEC §4.1) — no login required.
 export function DirectoryPage() {
   const { t } = useTranslation()
-  const db = useDB()
+  const daycares = useQuery(() => backend.listDaycares())
 
   return (
     <div>
@@ -33,10 +32,8 @@ export function DirectoryPage() {
         </p>
       </div>
       <div className="grid gap-4 sm:grid-cols-2">
-        {db.daycares.map((d) => {
+        {(daycares.data ?? []).map((d) => {
           const capacity = d.capacity.infant + d.capacity.toddler + d.capacity.preschool
-          const enrolled = enrolledCount(db, d.id)
-          const waitlist = orderedWaitlist(db, d.id).length
           return (
             <Link key={d.id} to={`/daycare/${d.id}`}>
               <Card className="h-full transition-shadow hover:shadow-md">
@@ -53,9 +50,12 @@ export function DirectoryPage() {
                 <p className="mt-3 line-clamp-2 text-sm text-slate-600">{d.description}</p>
                 <div className="mt-3 flex flex-wrap gap-1.5 text-xs">
                   <Badge tone="arctic">
-                    {t('directory.enrolledOfCapacity', '{{enrolled}} of {{capacity}} spots filled', { enrolled, capacity })}
+                    {t('directory.enrolledOfCapacity', '{{enrolled}} of {{capacity}} spots filled', {
+                      enrolled: d.enrolledTotal,
+                      capacity,
+                    })}
                   </Badge>
-                  <Badge>{t('directory.waitlistCount', '{{count}} on waitlist', { count: waitlist })}</Badge>
+                  <Badge>{t('directory.waitlistCount', '{{count}} on waitlist', { count: d.waitlistCount })}</Badge>
                   {d.languages.map((l) => (
                     <Badge key={l} tone="blue">
                       {l}
